@@ -2,11 +2,28 @@
   "name": "frontend",
   "version": "0.1.0",
   "private": true,
+  "main": "electron/main.js",
   "scripts": {
     "dev": "next dev -p 3000",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "desktop": "next build && electron .",
+    "desktop:pack": "next build && electron-builder --win nsis"
+  },
+  "build": {
+    "appId": "com.a2a.codingagent",
+    "productName": "A2A Coding Agent Desktop",
+    "directories": {
+      "output": "dist-desktop"
+    },
+    "files": [
+      "electron/**/*",
+      "out/**/*"
+    ],
+    "win": {
+      "target": ["nsis", "portable"]
+    }
   },
   "dependencies": {
     "@a2a/shared-types": "workspace:*",
@@ -22,6 +39,8 @@
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "autoprefixer": "^10.4.20",
+    "electron": "^31.3.1",
+    "electron-builder": "^24.13.3",
     "postcss": "^8.4.41",
     "tailwindcss": "^3.4.9",
     "typescript": "^5.5.4"

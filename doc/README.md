@@ -1,53 +1,57 @@
-# A2A Platform
+# A2A Desktop Coding Agent Documentation
 
-A platform where independent AI agents discover and delegate tasks to
-each other using Google's A2A (Agent2Agent) protocol.
+A native desktop application and multi-agent system designed exclusively for coding tasks, using Google's A2A (Agent2Agent) protocol.
 
-## Reference docs
+## Reference Documentation
 
-- `ARCHITECTURE.md` — layer breakdown, request flow, security principles
-- `AGENT_CARD_SPEC.md` — Agent Card JSON schema used across the project
+- `ARCHITECTURE.md` — layer breakdown, request flow, desktop app architecture, security principles
+- `AGENT_CARD_SPEC.md` — Agent Card JSON schema used for coding worker agents
 - `API_SPEC.md` — orchestrator endpoints, request/response schemas
 - `SECURITY.md` — auth flow, secrets handling, mTLS setup
 - `ENV_SETUP.md` — required environment variables
 - `TESTING.md` — how to run tests locally
-- `PROMPTS.md` — phase-wise build prompts for Claude Code
+- `PROMPTS.md` — phase-wise build prompts
 - `CHANGELOG.md` — version history
 
-## Project structure
+## Project Structure
 
 ```
 apps/
   gateway/         # API gateway: auth, rate limiting
-  orchestrator/     # A2A orchestrator: routing, agent registry client
-  agent-worker/      # Worker agent: executes tasks, calls LLM/tools
-  frontend/         # Next.js + TailwindCSS dashboard
+  orchestrator/     # A2A orchestrator: task routing, coding agent registry
+  agent-worker/      # Coding worker agent: task execution, diff proposals, sandboxed code runner
+  frontend/         # Desktop application (Electron shell + Next.js React UI)
 packages/
   shared-types/     # Shared TypeScript types across apps
 ```
 
-## Local setup
+## Running the Desktop Application
 
 ```bash
 pnpm install
 cp .env.example .env      # fill in secrets, see ENV_SETUP.md
 docker compose up -d      # starts Redis + Postgres
-pnpm dev                  # starts gateway, orchestrator, agent-worker
+pnpm run start:all        # starts gateway, orchestrator, agent-worker, and Electron desktop app
 ```
 
-## Build order
+### Packaging Windows `.exe`
 
-Follow `PROMPTS.md` phase by phase (1 → 9). Each phase assumes the
-previous one is complete and working.
+To package the standalone native desktop application executable for Windows:
+
+```bash
+pnpm --filter frontend run desktop:pack
+```
+
+Packaged binaries are output to `apps/frontend/dist-desktop/`.
 
 ## Status
 
 - [x] Phase 1 — Monorepo setup
 - [x] Phase 2 — API gateway
 - [x] Phase 3 — A2A orchestrator core
-- [x] Phase 4 — Agent registry
-- [x] Phase 5 — Worker agent
+- [x] Phase 4 — Agent registry & coding agent cards
+- [x] Phase 5 — Coding worker agent
 - [x] Phase 6 — Task queue
-- [x] Phase 7 — Frontend
+- [x] Phase 7 — Desktop Frontend (Electron + Next.js file tree, diff viewer, workspace selector)
 - [x] Phase 8 — Security hardening
-- [x] Phase 9 — Deployment
+- [x] Phase 9 — Windows `.exe` Desktop packaging & distribution

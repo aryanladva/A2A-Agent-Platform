@@ -26,8 +26,22 @@ export interface AgentCard {
   maxConcurrency?: number;
 }
 
+export interface CodingTaskPayload {
+  projectPath: string;
+  instruction: string;
+  targetFile?: string;
+  files?: Array<{ path: string; content: string }>;
+}
+
+export interface FileDiffProposal {
+  filePath: string;
+  originalContent: string;
+  proposedContent: string;
+  diffSummary: string;
+}
+
 export interface TaskCreateRequest {
-  skill: string;
+  skill: 'code-generation' | 'code-runner' | 'git-operations' | 'file-operations' | 'code-review' | string;
   input: Record<string, unknown>;
   streaming?: boolean;
 }

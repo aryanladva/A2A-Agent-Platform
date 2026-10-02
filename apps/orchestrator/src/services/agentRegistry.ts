@@ -27,42 +27,60 @@ export class PostgresAgentRegistryService {
   private initDefaultAgents(): void {
     const defaultAgents: Array<Omit<AgentCard, 'signature'>> = [
       {
-        name: 'invoice-parser-agent',
-        description: 'Extracts structured data from invoice documents',
+        name: 'coding-worker-agent',
+        description: 'Desktop AI coding agent executing code generation, refactoring, sandboxed execution, git operations, and local file diffs',
         version: '1.0.0',
-        url: 'http://localhost:4200/invoice-parser',
+        url: 'http://localhost:4200',
         authentication: { schemes: ['oauth2'] },
         capabilities: { streaming: true, pushNotifications: false },
         maxConcurrency: 5,
         skills: [
           {
-            id: 'parse-invoice',
-            name: 'Parse invoice',
-            description: 'Extracts vendor, line items, totals from a PDF/image invoice',
-            inputModes: ['application/pdf', 'image/png'],
+            id: 'code-generation',
+            name: 'Code Generation & Refactoring',
+            description: 'Generates, refactors, and updates code based on instructions and project context',
+            inputModes: ['application/json'],
             outputModes: ['application/json'],
           },
-        ],
-      },
-      {
-        name: 'echo-agent',
-        description: 'Echoes back task input for testing and debugging',
-        version: '1.0.0',
-        url: 'http://localhost:4200/echo',
-        authentication: { schemes: ['oauth2'] },
-        capabilities: { streaming: true, pushNotifications: false },
-        maxConcurrency: 10,
-        skills: [
+          {
+            id: 'code-runner',
+            name: 'Sandboxed Execution & Debugging',
+            description: 'Runs code snippets and tests in a sandboxed environment to inspect output and debug errors',
+            inputModes: ['application/json'],
+            outputModes: ['application/json'],
+          },
+          {
+            id: 'git-operations',
+            name: 'Git Operations',
+            description: 'Performs local git commands (status, diff, commit, branch management)',
+            inputModes: ['application/json'],
+            outputModes: ['application/json'],
+          },
+          {
+            id: 'file-operations',
+            name: 'Local Workspace File Operations',
+            description: 'Reads and writes files in a selected local project folder',
+            inputModes: ['application/json'],
+            outputModes: ['application/json'],
+          },
+          {
+            id: 'code-review',
+            name: 'Code Review & Explanation',
+            description: 'Reviews pull requests, code diffs, and provides explanations/suggestions',
+            inputModes: ['application/json'],
+            outputModes: ['application/json'],
+          },
           {
             id: 'echo',
             name: 'Echo input',
-            description: 'Echoes input parameters',
+            description: 'Echoes input parameters for testing',
             inputModes: ['application/json'],
             outputModes: ['application/json'],
           },
         ],
       },
     ];
+
 
     for (const rawCard of defaultAgents) {
       const signedCard = signAgentCard(rawCard, config.agentCardSigningKey);

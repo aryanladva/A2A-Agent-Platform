@@ -28,14 +28,57 @@ export function signWorkerAgentCard(
 }
 
 export function getWorkerAgentCard(): AgentCard {
-  const agentName = config.isMock ? 'mock-worker-agent' : 'invoice-parser-worker-agent';
+  const agentName = config.isMock ? 'coding-worker-agent-mock' : 'coding-worker-agent';
   const url = `http://localhost:${config.port}`;
+
+  const codingSkills = [
+    {
+      id: 'code-generation',
+      name: 'Code Generation & Refactoring',
+      description: 'Generates, refactors, and updates code based on instructions and project context',
+      inputModes: ['application/json'],
+      outputModes: ['application/json'],
+    },
+    {
+      id: 'code-runner',
+      name: 'Sandboxed Execution & Debugging',
+      description: 'Runs code snippets and tests in a sandboxed environment to inspect output and debug errors',
+      inputModes: ['application/json'],
+      outputModes: ['application/json'],
+    },
+    {
+      id: 'git-operations',
+      name: 'Git Operations',
+      description: 'Performs local git commands (status, diff, commit, branch management)',
+      inputModes: ['application/json'],
+      outputModes: ['application/json'],
+    },
+    {
+      id: 'file-operations',
+      name: 'Local Workspace File Operations',
+      description: 'Reads and writes files in a selected local project folder',
+      inputModes: ['application/json'],
+      outputModes: ['application/json'],
+    },
+    {
+      id: 'code-review',
+      name: 'Code Review & Explanation',
+      description: 'Reviews pull requests, code diffs, and provides explanations/suggestions',
+      inputModes: ['application/json'],
+      outputModes: ['application/json'],
+    },
+    {
+      id: 'echo',
+      name: 'Echo Skill',
+      description: 'Returns input parameters for testing',
+      inputModes: ['application/json'],
+      outputModes: ['application/json'],
+    },
+  ];
 
   const rawCard: Omit<AgentCard, 'signature'> = {
     name: agentName,
-    description: config.isMock
-      ? 'Mock worker agent for testing per TESTING.md'
-      : 'Production AI worker agent executing tasks and tools',
+    description: 'Desktop AI coding agent executing code generation, refactoring, sandboxed execution, git operations, and local file diffs',
     version: '1.0.0',
     url,
     authentication: {
@@ -45,36 +88,12 @@ export function getWorkerAgentCard(): AgentCard {
       streaming: true,
       pushNotifications: false,
     },
-    skills: config.isMock
-      ? [
-          {
-            id: 'echo',
-            name: 'Echo Skill',
-            description: 'Returns a canned echo response without calling LLMs',
-            inputModes: ['application/json'],
-            outputModes: ['application/json'],
-          },
-          {
-            id: 'parse-invoice',
-            name: 'Parse Invoice Skill',
-            description: 'Extracts line items and totals from invoices',
-            inputModes: ['application/pdf'],
-            outputModes: ['application/json'],
-          },
-        ]
-      : [
-          {
-            id: 'parse-invoice',
-            name: 'Parse Invoice Skill',
-            description: 'Extracts line items and totals from invoices',
-            inputModes: ['application/pdf', 'image/png'],
-            outputModes: ['application/json'],
-          },
-        ],
+    skills: codingSkills,
   };
 
   return signWorkerAgentCard(rawCard, config.agentCardSigningKey);
 }
+
 
 export async function registerWithOrchestrator(maxRetries = 15): Promise<boolean> {
   const card = getWorkerAgentCard();
