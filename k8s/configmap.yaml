@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: a2a-config
+  namespace: a2a-system
+data:
+  NODE_ENV: 'production'
+  GATEWAY_PORT: '4000'
+  ORCHESTRATOR_PORT: '4100'
+  WORKER_PORT: '4200'
+  RATE_LIMIT_PER_MIN: '100'
+  LLM_PROVIDER: 'mock'
+  OTEL_EXPORTER_ENDPOINT: 'http://otel-collector:4318/v1/traces'
+  ORCHESTRATOR_URL: 'http://orchestrator-service:4100'
+  NEXT_PUBLIC_GATEWAY_URL: 'http://gateway-service:4000'
+  NEXT_PUBLIC_ORCHESTRATOR_URL: 'http://orchestrator-service:4100'

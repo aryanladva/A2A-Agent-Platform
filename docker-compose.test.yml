@@ -1,0 +1,30 @@
+services:
+  postgres-test:
+    image: postgres:16-alpine
+    container_name: a2a-postgres-test
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+      POSTGRES_DB: a2a_test_db
+    ports:
+      - '5433:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d a2a_test_db']
+      interval: 3s
+      timeout: 3s
+      retries: 5
+
+  redis-test:
+    image: redis:7-alpine
+    container_name: a2a-redis-test
+    ports:
+      - '6380:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 3s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  postgres_test_data:
+  redis_test_data:

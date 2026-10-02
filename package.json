@@ -1,0 +1,30 @@
+{
+  "name": "a2a-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "pnpm -r --filter \"!a2a-monorepo\" run build",
+    "lint": "eslint . --ext .ts",
+    "format": "prettier --write \"**/*.{ts,tsx,json,md,yml,yaml}\"",
+    "dev": "node scripts/start-all.js",
+    "start:all": "node scripts/start-all.js",
+    "stop:all": "node scripts/stop-all.js",
+    "env:check": "node scripts/env-check.js",
+    "test": "pnpm --filter gateway test && pnpm --filter orchestrator test && pnpm --filter agent-worker test",
+    "test:integration": "vitest run tests/integration/e2e.test.ts"
+  },
+  "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.6",
+    "@types/supertest": "^6.0.2",
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
+    "concurrently": "^8.2.2",
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^9.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "prettier": "^3.3.3",
+    "supertest": "^7.0.0",
+    "typescript": "^5.5.4",
+    "vitest": "^2.0.5"
+  }
+}
