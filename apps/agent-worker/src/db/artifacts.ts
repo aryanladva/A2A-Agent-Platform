@@ -1,6 +1,7 @@
-import { Pool } from 'pg';
+import Database from 'better-sqlite3';
+import fs from 'fs';
+import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
-import { config } from '../config';
 
 export interface TaskArtifact {
   id: string;
@@ -12,45 +13,36 @@ export interface TaskArtifact {
 }
 
 export class ArtifactsStore {
-  private pool: Pool;
-  private isPostgresAvailable = false;
-  private inMemoryArtifacts: Map<string, TaskArtifact[]> = new Map();
-
-  constructor() {
-    this.pool = new Pool({
-      connectionString: config.databaseUrl,
-      connectionTimeoutMillis: 3000,
-    });
-  }
+  private db: Database.Database | null = null;
 
   public async initDb(): Promise<boolean> {
     try {
-      const client = await this.pool.connect();
-      try {
-        await client.query(`
-          CREATE TABLE IF NOT EXISTS task_artifacts (
-            id VARCHAR(255) PRIMARY KEY,
-            task_id VARCHAR(255) NOT NULL,
-            agent_name VARCHAR(255) NOT NULL,
-            artifact_type VARCHAR(100) NOT NULL,
-            content JSONB NOT NULL,
-            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-          );
-
-          CREATE INDEX IF NOT EXISTS idx_task_artifacts_task ON task_artifacts(task_id);
-        `);
-        this.isPostgresAvailable = true;
-        console.log('[Worker DB] Postgres task_artifacts table initialized.');
-        return true;
-      } finally {
-        client.release();
+      const dbPath = process.env.SQLITE_PATH || './data/a2a.sqlite';
+      if (dbPath !== ':memory:') {
+        const dir = path.dirname(path.resolve(dbPath));
+        if (!fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
+        }
       }
+
+      this.db = new Database(dbPath);
+      this.db.pragma('journal_mode = WAL');
+
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS task_artifacts (
+          id TEXT PRIMARY KEY,
+          task_id TEXT NOT NULL,
+          agent_name TEXT NOT NULL,
+          artifact_type TEXT NOT NULL,
+          content TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_task_artifacts_task ON task_artifacts(task_id);
+      `);
+      console.log('[Worker DB] SQLite task_artifacts table initialized.');
+      return true;
     } catch (err) {
-      console.warn(
-        '[Worker DB] Postgres connection failed, using in-memory artifacts store:',
-        (err as Error).message
-      );
-      this.isPostgresAvailable = false;
+      console.warn('[Worker DB] SQLite initialization failed:', (err as Error).message);
       return false;
     }
   }
@@ -73,55 +65,30 @@ export class ArtifactsStore {
       createdAt: now,
     };
 
-    if (this.isPostgresAvailable) {
-      try {
-        await this.pool.query(
-          `
-          INSERT INTO task_artifacts (id, task_id, agent_name, artifact_type, content, created_at)
-          VALUES ($1, $2, $3, $4, $5, NOW())
-        `,
-          [id, taskId, agentName, artifactType, JSON.stringify(content)]
-        );
-      } catch (err) {
-        console.warn('[Worker DB] Insert failed, falling back to memory:', (err as Error).message);
-        this.saveToMemory(taskId, artifact);
-      }
-    } else {
-      this.saveToMemory(taskId, artifact);
+    if (this.db) {
+      const stmt = this.db.prepare(`
+        INSERT INTO task_artifacts (id, task_id, agent_name, artifact_type, content, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `);
+      stmt.run(id, taskId, agentName, artifactType, JSON.stringify(content), now);
     }
 
     return artifact;
   }
 
-  private saveToMemory(taskId: string, artifact: TaskArtifact): void {
-    const existing = this.inMemoryArtifacts.get(taskId) || [];
-    existing.push(artifact);
-    this.inMemoryArtifacts.set(taskId, existing);
-  }
-
   public async getArtifactsByTask(taskId: string): Promise<TaskArtifact[]> {
-    if (this.isPostgresAvailable) {
-      try {
-        const res = await this.pool.query(
-          `SELECT id, task_id, agent_name, artifact_type, content, created_at FROM task_artifacts WHERE task_id = $1 ORDER BY created_at ASC`,
-          [taskId]
-        );
-        if (res.rows.length > 0) {
-          return res.rows.map((row) => ({
-            id: row.id,
-            taskId: row.task_id,
-            agentName: row.agent_name,
-            artifactType: row.artifact_type,
-            content: typeof row.content === 'string' ? JSON.parse(row.content) : row.content,
-            createdAt: row.created_at,
-          }));
-        }
-      } catch (_err) {
-        // Fallthrough
-      }
+    if (this.db) {
+      const rows = this.db.prepare('SELECT * FROM task_artifacts WHERE task_id = ? ORDER BY created_at ASC').all(taskId) as any[];
+      return rows.map((row) => ({
+        id: row.id,
+        taskId: row.task_id,
+        agentName: row.agent_name,
+        artifactType: row.artifact_type,
+        content: typeof row.content === 'string' ? JSON.parse(row.content) : row.content,
+        createdAt: row.created_at,
+      }));
     }
-
-    return this.inMemoryArtifacts.get(taskId) || [];
+    return [];
   }
 }
 

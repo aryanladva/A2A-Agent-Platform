@@ -1,7 +1,7 @@
 import { AgentCard } from '@a2a/shared-types';
 import { config } from '../config';
 import { signAgentCard, verifyAgentCardSignature } from '../utils/crypto';
-import { pool } from '../db/connection';
+import { getSqliteDb } from '../db/sqlite';
 
 export interface AgentRegistryRecord {
   card: AgentCard;
@@ -10,28 +10,28 @@ export interface AgentRegistryRecord {
   activeConcurrency: number;
 }
 
-export class PostgresAgentRegistryService {
-  private inMemoryAgents: Map<string, AgentRegistryRecord> = new Map();
-  private isPostgresAvailable = false;
-  private heartbeatTimeoutMs = 90000; // 90 seconds timeout for stale agents
-  private defaultMaxConcurrency = 5; // Default per-agent concurrency cap per SECURITY.md
+export class SqliteAgentRegistryService {
+  private inMemoryConcurrency: Map<string, number> = new Map();
+  private heartbeatTimeoutMs = 90000; // 90s stale threshold
+  private defaultMaxConcurrency = 5;
 
   constructor() {
     this.initDefaultAgents();
   }
 
-  public setPostgresAvailable(available: boolean): void {
-    this.isPostgresAvailable = available;
+  public setPostgresAvailable(_available: boolean): void {
+    // No-op for SQLite compatibility
   }
 
   private initDefaultAgents(): void {
     const defaultAgents: Array<Omit<AgentCard, 'signature'>> = [
       {
         name: 'coding-worker-agent',
-        description: 'Desktop AI coding agent executing code generation, refactoring, sandboxed execution, git operations, and local file diffs',
+        description:
+          'Desktop AI coding agent executing code generation, refactoring, sandboxed execution, git operations, and local file diffs',
         version: '1.0.0',
-        url: 'http://localhost:4200',
-        authentication: { schemes: ['oauth2'] },
+        url: 'http://127.0.0.1:4200',
+        authentication: { schemes: [] },
         capabilities: { streaming: true, pushNotifications: false },
         maxConcurrency: 5,
         skills: [
@@ -81,17 +81,12 @@ export class PostgresAgentRegistryService {
       },
     ];
 
-
     for (const rawCard of defaultAgents) {
       const signedCard = signAgentCard(rawCard, config.agentCardSigningKey);
       this.registerAgent(signedCard, false).catch(() => {});
     }
   }
 
-  /**
-   * Registers or updates an Agent Card.
-   * Verifies Agent Card signature before storing it per SECURITY.md ("Agent authenticity").
-   */
   public async registerAgent(card: AgentCard, verifySignature = true): Promise<void> {
     if (!card.name || !card.skills || !Array.isArray(card.skills)) {
       throw new Error('Invalid Agent Card schema: name and skills array are required');
@@ -108,239 +103,122 @@ export class PostgresAgentRegistryService {
 
     const maxConcurrency = card.maxConcurrency || this.defaultMaxConcurrency;
     const cardWithConcurrency: AgentCard = { ...card, maxConcurrency };
-    const now = new Date();
+    const now = new Date().toISOString();
 
-    if (this.isPostgresAvailable) {
-      try {
-        await pool.query(
-          `
-          INSERT INTO agents (name, description, version, url, authentication, capabilities, skills, signature, status, last_heartbeat, updated_at)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active', NOW(), NOW())
-          ON CONFLICT (name) DO UPDATE SET
-            description = EXCLUDED.description,
-            version = EXCLUDED.version,
-            url = EXCLUDED.url,
-            authentication = EXCLUDED.authentication,
-            capabilities = EXCLUDED.capabilities,
-            skills = EXCLUDED.skills,
-            signature = EXCLUDED.signature,
-            status = 'active',
-            last_heartbeat = NOW(),
-            updated_at = NOW()
-        `,
-          [
-            cardWithConcurrency.name,
-            cardWithConcurrency.description || '',
-            cardWithConcurrency.version || '1.0.0',
-            cardWithConcurrency.url || '',
-            JSON.stringify(cardWithConcurrency.authentication || { schemes: [] }),
-            JSON.stringify(
-              cardWithConcurrency.capabilities || { streaming: false, pushNotifications: false }
-            ),
-            JSON.stringify(cardWithConcurrency.skills),
-            JSON.stringify(cardWithConcurrency.signature || {}),
-          ]
-        );
-      } catch (err) {
-        console.warn(
-          '[Registry] Postgres insert failed, saving to in-memory fallback:',
-          (err as Error).message
-        );
-        this.saveToMemory(cardWithConcurrency, now);
-      }
-    } else {
-      this.saveToMemory(cardWithConcurrency, now);
-    }
+    const db = getSqliteDb();
+    const stmt = db.prepare(`
+      INSERT INTO agents (name, description, version, url, authentication, capabilities, skills, signature, status, last_heartbeat, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
+      ON CONFLICT(name) DO UPDATE SET
+        description = excluded.description,
+        version = excluded.version,
+        url = excluded.url,
+        authentication = excluded.authentication,
+        capabilities = excluded.capabilities,
+        skills = excluded.skills,
+        signature = excluded.signature,
+        status = 'active',
+        last_heartbeat = excluded.last_heartbeat,
+        updated_at = excluded.updated_at
+    `);
+
+    stmt.run(
+      cardWithConcurrency.name,
+      cardWithConcurrency.description || '',
+      cardWithConcurrency.version || '1.0.0',
+      cardWithConcurrency.url || '',
+      JSON.stringify(cardWithConcurrency.authentication || { schemes: [] }),
+      JSON.stringify(cardWithConcurrency.capabilities || { streaming: false, pushNotifications: false }),
+      JSON.stringify(cardWithConcurrency.skills),
+      JSON.stringify(cardWithConcurrency.signature || {}),
+      now,
+      now,
+      now
+    );
   }
 
-  private saveToMemory(card: AgentCard, lastHeartbeat: Date): void {
-    const existing = this.inMemoryAgents.get(card.name);
-    this.inMemoryAgents.set(card.name, {
-      card,
-      status: 'active',
-      lastHeartbeat,
-      activeConcurrency: existing ? existing.activeConcurrency : 0,
-    });
-  }
-
-  /**
-   * Check per-agent concurrency limit per SECURITY.md
-   */
   public canAgentAcceptTask(agentName: string): boolean {
-    const record = this.inMemoryAgents.get(agentName);
-    if (!record) return true;
-    const limit = record.card.maxConcurrency || this.defaultMaxConcurrency;
-    return record.activeConcurrency < limit;
+    const active = this.inMemoryConcurrency.get(agentName) || 0;
+    const db = getSqliteDb();
+    const row = db.prepare('SELECT capabilities, skills FROM agents WHERE name = ?').get(agentName) as { capabilities?: string; skills?: string } | undefined;
+    const limit = this.defaultMaxConcurrency;
+    return active < limit;
   }
 
   public incrementAgentConcurrency(agentName: string): void {
-    const record = this.inMemoryAgents.get(agentName);
-    if (record) {
-      record.activeConcurrency += 1;
-    }
+    const current = this.inMemoryConcurrency.get(agentName) || 0;
+    this.inMemoryConcurrency.set(agentName, current + 1);
   }
 
   public decrementAgentConcurrency(agentName: string): void {
-    const record = this.inMemoryAgents.get(agentName);
-    if (record && record.activeConcurrency > 0) {
-      record.activeConcurrency -= 1;
+    const current = this.inMemoryConcurrency.get(agentName) || 0;
+    if (current > 0) {
+      this.inMemoryConcurrency.set(agentName, current - 1);
     }
   }
 
   public getAgentConcurrencyStats(agentName: string): { active: number; limit: number } {
-    const record = this.inMemoryAgents.get(agentName);
-    const limit = record?.card.maxConcurrency || this.defaultMaxConcurrency;
-    const active = record?.activeConcurrency || 0;
-    return { active, limit };
+    const active = this.inMemoryConcurrency.get(agentName) || 0;
+    return { active, limit: this.defaultMaxConcurrency };
   }
 
   public async recordHeartbeat(agentName: string): Promise<boolean> {
-    const now = new Date();
-
-    if (this.isPostgresAvailable) {
-      try {
-        const res = await pool.query(
-          `UPDATE agents SET last_heartbeat = NOW(), status = 'active', updated_at = NOW() WHERE name = $1`,
-          [agentName]
-        );
-        if (res.rowCount && res.rowCount > 0) return true;
-      } catch (_err) {
-        // Fallthrough
-      }
-    }
-
-    const memRecord = this.inMemoryAgents.get(agentName);
-    if (memRecord) {
-      memRecord.lastHeartbeat = now;
-      memRecord.status = 'active';
-      return true;
-    }
-
-    return false;
+    const now = new Date().toISOString();
+    const db = getSqliteDb();
+    const res = db.prepare("UPDATE agents SET last_heartbeat = ?, status = 'active', updated_at = ? WHERE name = ?").run(now, now, agentName);
+    return res.changes > 0;
   }
 
   public async sweepStaleAgents(): Promise<number> {
-    let sweptCount = 0;
-    const cutoffTime = new Date(Date.now() - this.heartbeatTimeoutMs);
-
-    if (this.isPostgresAvailable) {
-      try {
-        const res = await pool.query(
-          `UPDATE agents SET status = 'inactive', updated_at = NOW() WHERE status = 'active' AND last_heartbeat < $1`,
-          [cutoffTime]
-        );
-        sweptCount += res.rowCount || 0;
-      } catch (_err) {
-        // Fallthrough
-      }
-    }
-
-    for (const record of this.inMemoryAgents.values()) {
-      if (record.status === 'active' && record.lastHeartbeat < cutoffTime) {
-        record.status = 'inactive';
-        sweptCount++;
-      }
-    }
-
-    return sweptCount;
+    const cutoffTime = new Date(Date.now() - this.heartbeatTimeoutMs).toISOString();
+    const now = new Date().toISOString();
+    const db = getSqliteDb();
+    const res = db.prepare("UPDATE agents SET status = 'inactive', updated_at = ? WHERE status = 'active' AND last_heartbeat < ?").run(now, cutoffTime);
+    return res.changes;
   }
 
   public async getAllActiveAgents(): Promise<AgentCard[]> {
     await this.sweepStaleAgents();
+    const db = getSqliteDb();
+    const rows = db.prepare("SELECT name, description, version, url, authentication, capabilities, skills, signature FROM agents WHERE status = 'active'").all() as any[];
 
-    if (this.isPostgresAvailable) {
-      try {
-        const res = await pool.query(
-          `SELECT name, description, version, url, authentication, capabilities, skills, signature FROM agents WHERE status = 'active'`
-        );
-        if (res.rows.length > 0) {
-          return res.rows.map((row) => ({
-            name: row.name,
-            description: row.description,
-            version: row.version,
-            url: row.url,
-            authentication:
-              typeof row.authentication === 'string'
-                ? JSON.parse(row.authentication)
-                : row.authentication,
-            capabilities:
-              typeof row.capabilities === 'string'
-                ? JSON.parse(row.capabilities)
-                : row.capabilities,
-            skills: typeof row.skills === 'string' ? JSON.parse(row.skills) : row.skills,
-            signature:
-              typeof row.signature === 'string' ? JSON.parse(row.signature) : row.signature,
-          }));
-        }
-      } catch (_err) {
-        // Fallthrough
-      }
-    }
-
-    const activeCards: AgentCard[] = [];
-    for (const record of this.inMemoryAgents.values()) {
-      if (record.status === 'active') {
-        activeCards.push(record.card);
-      }
-    }
-    return activeCards;
+    return rows.map((row) => ({
+      name: row.name,
+      description: row.description,
+      version: row.version,
+      url: row.url,
+      authentication: typeof row.authentication === 'string' ? JSON.parse(row.authentication) : row.authentication,
+      capabilities: typeof row.capabilities === 'string' ? JSON.parse(row.capabilities) : row.capabilities,
+      skills: typeof row.skills === 'string' ? JSON.parse(row.skills) : row.skills,
+      signature: typeof row.signature === 'string' ? JSON.parse(row.signature) : row.signature,
+    }));
   }
 
   public async findAgentsBySkill(skillId: string): Promise<AgentCard[]> {
-    await this.sweepStaleAgents();
-
-    if (this.isPostgresAvailable) {
-      try {
-        const res = await pool.query(
-          `
-          SELECT name, description, version, url, authentication, capabilities, skills, signature
-          FROM agents
-          WHERE status = 'active' AND skills @> $1::jsonb
-        `,
-          [JSON.stringify([{ id: skillId }])]
-        );
-
-        if (res.rows.length > 0) {
-          return res.rows.map((row) => ({
-            name: row.name,
-            description: row.description,
-            version: row.version,
-            url: row.url,
-            authentication:
-              typeof row.authentication === 'string'
-                ? JSON.parse(row.authentication)
-                : row.authentication,
-            capabilities:
-              typeof row.capabilities === 'string'
-                ? JSON.parse(row.capabilities)
-                : row.capabilities,
-            skills: typeof row.skills === 'string' ? JSON.parse(row.skills) : row.skills,
-            signature:
-              typeof row.signature === 'string' ? JSON.parse(row.signature) : row.signature,
-          }));
-        }
-      } catch (_err) {
-        // Fallthrough
-      }
-    }
-
-    const matchingCards: AgentCard[] = [];
-    for (const record of this.inMemoryAgents.values()) {
-      if (record.status === 'active' && record.card.skills.some((s) => s.id === skillId)) {
-        matchingCards.push(record.card);
-      }
-    }
-    return matchingCards;
+    const agents = await this.getAllActiveAgents();
+    return agents.filter((agent) => agent.skills.some((s) => s.id === skillId));
   }
 
   public findAgentBySkillSync(skillId: string): AgentCard | undefined {
-    for (const record of this.inMemoryAgents.values()) {
-      if (record.status === 'active' && record.card.skills.some((s) => s.id === skillId)) {
-        return record.card;
+    const db = getSqliteDb();
+    const rows = db.prepare("SELECT name, description, version, url, authentication, capabilities, skills, signature FROM agents WHERE status = 'active'").all() as any[];
+    for (const row of rows) {
+      const skills = typeof row.skills === 'string' ? JSON.parse(row.skills) : row.skills;
+      if (Array.isArray(skills) && skills.some((s: any) => s.id === skillId)) {
+        return {
+          name: row.name,
+          description: row.description,
+          version: row.version,
+          url: row.url,
+          authentication: typeof row.authentication === 'string' ? JSON.parse(row.authentication) : row.authentication,
+          capabilities: typeof row.capabilities === 'string' ? JSON.parse(row.capabilities) : row.capabilities,
+          skills,
+          signature: typeof row.signature === 'string' ? JSON.parse(row.signature) : row.signature,
+        };
       }
     }
     return undefined;
   }
 }
 
-export const agentRegistry = new PostgresAgentRegistryService();
+export const agentRegistry = new SqliteAgentRegistryService();

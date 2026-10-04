@@ -1,6 +1,7 @@
 import { EventEmitter } from 'events';
 import { v4 as uuidv4 } from 'uuid';
 import { TaskStatus, TaskStatusResponse } from '@a2a/shared-types';
+import { getSqliteDb } from '../db/sqlite';
 
 export interface TaskRecord extends TaskStatusResponse {
   skill: string;
@@ -16,9 +17,19 @@ export interface TaskEvent {
   message?: string;
 }
 
-export class TaskStoreService extends EventEmitter {
-  private tasks: Map<string, TaskRecord> = new Map();
+export interface FileChangeRecord {
+  id: string;
+  taskId: string;
+  filePath: string;
+  originalContent: string;
+  proposedContent: string;
+  diffSummary: string;
+  status: 'proposed' | 'applied' | 'rejected';
+  createdAt: string;
+  updatedAt: string;
+}
 
+export class SqliteTaskStoreService extends EventEmitter {
   public createTask(
     skill: string,
     input: Record<string, unknown>,
@@ -29,6 +40,45 @@ export class TaskStoreService extends EventEmitter {
     const taskId = `task_${rawId}`;
     const now = new Date().toISOString();
 
+    const initialProgress = [
+      {
+        timestamp: now,
+        message: `Task created and queued for agent ${assignedAgent}`,
+      },
+    ];
+
+    const db = getSqliteDb();
+    const insertTask = db.prepare(`
+      INSERT INTO tasks (id, skill, input, assigned_agent, status, progress, result, error, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    insertTask.run(
+      taskId,
+      skill,
+      JSON.stringify(input),
+      assignedAgent,
+      'queued',
+      JSON.stringify(initialProgress),
+      null,
+      null,
+      now,
+      now
+    );
+
+    const insertEvent = db.prepare(`
+      INSERT INTO task_events (id, task_id, timestamp, message, type, metadata)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    insertEvent.run(
+      `evt_${uuidv4().replace(/-/g, '').substring(0, 12)}`,
+      taskId,
+      now,
+      `Task created and queued for agent ${assignedAgent}`,
+      'created',
+      JSON.stringify({ skill, assignedAgent })
+    );
+
     const task: TaskRecord = {
       taskId,
       status: 'queued',
@@ -38,22 +88,31 @@ export class TaskStoreService extends EventEmitter {
       streaming,
       createdAt: now,
       updatedAt: now,
-      progress: [
-        {
-          timestamp: now,
-          message: `Task created and queued for agent ${assignedAgent}`,
-        },
-      ],
+      progress: initialProgress,
     };
 
-    this.tasks.set(taskId, task);
     this.emit(`task:${taskId}`, { type: 'status', task });
-
     return task;
   }
 
   public getTask(taskId: string): TaskRecord | undefined {
-    return this.tasks.get(taskId);
+    const db = getSqliteDb();
+    const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) as any;
+    if (!row) return undefined;
+
+    return {
+      taskId: row.id,
+      skill: row.skill,
+      input: typeof row.input === 'string' ? JSON.parse(row.input) : row.input,
+      assignedAgent: row.assigned_agent,
+      status: row.status as TaskStatus,
+      progress: row.progress ? JSON.parse(row.progress) : [],
+      result: row.result ? JSON.parse(row.result) : undefined,
+      error: row.error || undefined,
+      streaming: false,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
   }
 
   public updateTaskStatus(
@@ -63,7 +122,7 @@ export class TaskStoreService extends EventEmitter {
     result?: unknown,
     error?: string
   ): TaskRecord | undefined {
-    const task = this.tasks.get(taskId);
+    const task = this.getTask(taskId);
     if (!task) return undefined;
 
     const now = new Date().toISOString();
@@ -85,14 +144,43 @@ export class TaskStoreService extends EventEmitter {
       task.error = error;
     }
 
-    this.tasks.set(taskId, task);
-    this.emit(`task:${taskId}`, { type: status, task, message: progressMessage });
+    const db = getSqliteDb();
+    const stmt = db.prepare(`
+      UPDATE tasks
+      SET status = ?, progress = ?, result = ?, error = ?, updated_at = ?
+      WHERE id = ?
+    `);
 
+    stmt.run(
+      status,
+      JSON.stringify(task.progress),
+      task.result !== undefined ? JSON.stringify(task.result) : null,
+      task.error || null,
+      now,
+      taskId
+    );
+
+    if (progressMessage) {
+      const insertEvent = db.prepare(`
+        INSERT INTO task_events (id, task_id, timestamp, message, type, metadata)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `);
+      insertEvent.run(
+        `evt_${uuidv4().replace(/-/g, '').substring(0, 12)}`,
+        taskId,
+        now,
+        progressMessage,
+        status,
+        JSON.stringify({ status })
+      );
+    }
+
+    this.emit(`task:${taskId}`, { type: status, task, message: progressMessage });
     return task;
   }
 
   public cancelTask(taskId: string): TaskRecord | undefined {
-    const task = this.tasks.get(taskId);
+    const task = this.getTask(taskId);
     if (!task) return undefined;
 
     if (task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled') {
@@ -100,6 +188,54 @@ export class TaskStoreService extends EventEmitter {
     }
 
     return this.updateTaskStatus(taskId, 'cancelled', 'Task was cancelled by user');
+  }
+
+  public addFileChange(
+    taskId: string,
+    filePath: string,
+    originalContent: string,
+    proposedContent: string,
+    diffSummary: string
+  ): FileChangeRecord {
+    const id = `diff_${uuidv4().replace(/-/g, '').substring(0, 12)}`;
+    const now = new Date().toISOString();
+    const db = getSqliteDb();
+
+    const stmt = db.prepare(`
+      INSERT INTO file_changes (id, task_id, file_path, original_content, proposed_content, diff_summary, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, 'proposed', ?, ?)
+    `);
+
+    stmt.run(id, taskId, filePath, originalContent, proposedContent, diffSummary, now, now);
+
+    return {
+      id,
+      taskId,
+      filePath,
+      originalContent,
+      proposedContent,
+      diffSummary,
+      status: 'proposed',
+      createdAt: now,
+      updatedAt: now,
+    };
+  }
+
+  public getFileChangesByTask(taskId: string): FileChangeRecord[] {
+    const db = getSqliteDb();
+    const rows = db.prepare('SELECT * FROM file_changes WHERE task_id = ?').all(taskId) as any[];
+
+    return rows.map((row) => ({
+      id: row.id,
+      taskId: row.task_id,
+      filePath: row.file_path,
+      originalContent: row.original_content,
+      proposedContent: row.proposed_content,
+      diffSummary: row.diff_summary,
+      status: row.status,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }));
   }
 
   public subscribe(taskId: string, listener: (event: TaskEvent) => void): () => void {
@@ -111,4 +247,4 @@ export class TaskStoreService extends EventEmitter {
   }
 }
 
-export const taskStore = new TaskStoreService();
+export const taskStore = new SqliteTaskStoreService();

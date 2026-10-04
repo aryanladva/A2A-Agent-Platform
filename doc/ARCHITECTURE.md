@@ -10,27 +10,28 @@ The scope is strictly tailored for **local coding tasks** (code generation, refa
 
 ```
 +-------------------------------------------------------------------------+
-|                  Electron Desktop Application (Frontend)                |
+|                  Desktop Application (Desktop Shell UI)                |
 |  +---------------------+  +---------------------+  +-----------------+  |
 |  | Local Project Picker|  | File Tree & Diffs   |  | SSE Task Stream |  |
 |  +---------------------+  +---------------------+  +-----------------+  |
 |                                    |                                    |
-|                       Electron IPC Bridge (Preload)                     |
+|                       Desktop IPC / API Bridge                          |
 |                                    |                                    |
 +------------------------------------|------------------------------------+
                                      | (Local FS / Git Diffs / HTTP API)
                                      v
 +-------------------------------------------------------------------------+
-|                              Backend Stack                              |
+|                       Single-User Local Backend Stack                   |
 |  +--------------------+    +-------------------+    +----------------+  |
 |  |     API Gateway    |--->|  A2A Orchestrator |--->| Coding Worker  |  |
-|  |  (Auth/Rate Limit) |    |  (Task Routing)   |    |    Agent       |  |
+|  | (127.0.0.1:4000)   |    | (127.0.0.1:4100)  |    |    Agent       |  |
 |  +--------------------+    +-------------------+    +----------------+  |
 |                                      |                      |           |
 |                                      v                      v           |
-|                                 +----------+           +----------+     |
-|                                 | Postgres |           |  Redis   |     |
-|                                 +----------+           +----------+     |
+|                            +-------------------+    +----------------+  |
+|                            |  Embedded SQLite  |    | In-Process     |  |
+|                            |  (data/a2a.sqlite)|    | Async Queue    |  |
+|                            +-------------------+    +----------------+  |
 +-------------------------------------------------------------------------+
 ```
 
@@ -38,12 +39,69 @@ The scope is strictly tailored for **local coding tasks** (code generation, refa
 
 | Layer                    | Responsibility                               | Tech                                         |
 | ------------------------ | -------------------------------------------- | -------------------------------------------- |
-| Desktop Client UI        | Folder picker, file tree, diff viewer, chat  | Electron, Next.js (Static Export), Tailwind  |
-| API gateway + auth       | AuthN/Z, rate limiting, TLS termination      | Express, OAuth2/JWT                          |
-| A2A orchestrator         | Task routing, coding agent registry client   | Node.js/TypeScript, official A2A SDK         |
-| Agent registry           | Stores signed coding Agent Cards             | Postgres                                     |
+| Desktop Client UI        | Folder picker, file tree, diff viewer, chat  | Desktop Shell UI (React + Tailwind)          |
+| API gateway              | Correlation ID tracing, local HTTP proxy    | Express                                      |
+| A2A orchestrator         | Task routing, coding agent registry client   | Node.js/TypeScript, A2A Protocol             |
+| Agent registry & store   | Stores signed coding Agent Cards & tasks     | Embedded SQLite (`data/a2a.sqlite`)          |
 | Coding worker agent      | Code generation, diff engine, sandboxed run  | TypeScript, LLM integration, git/fs helpers  |
-| Task queue + state store | Async task handoff, persistence              | Redis (queue), Postgres (state/artifacts)    |
+| Task queue               | Single-user local async task handoff         | In-process async queue                       |
+
+## Data Model (SQLite Schema)
+
+The persistence layer uses embedded SQLite (`SQLITE_PATH`, default `./data/a2a.sqlite`).
+
+### 1. `tasks`
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| `id` | TEXT | PRIMARY KEY | Unique task identifier (e.g. `task_abc123`) |
+| `skill` | TEXT | NOT NULL | Requested skill (e.g. `code-generation`) |
+| `input` | TEXT | NOT NULL | JSON stringified task payload |
+| `assigned_agent` | TEXT | NOT NULL | Target worker agent name |
+| `status` | TEXT | NOT NULL | `queued` \| `in_progress` \| `completed` \| `failed` \| `cancelled` |
+| `progress` | TEXT | NULL | JSON stringified progress timeline array |
+| `result` | TEXT | NULL | JSON stringified task result |
+| `error` | TEXT | NULL | Failure error message |
+| `created_at` | TEXT | NOT NULL | ISO 8601 creation timestamp |
+| `updated_at` | TEXT | NOT NULL | ISO 8601 update timestamp |
+
+### 2. `task_events`
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| `id` | TEXT | PRIMARY KEY | Unique event ID |
+| `task_id` | TEXT | NOT NULL, FK(`tasks.id`) | Reference to parent task |
+| `timestamp` | TEXT | NOT NULL | ISO 8601 event timestamp |
+| `message` | TEXT | NOT NULL | Human readable log or progress text |
+| `type` | TEXT | NOT NULL | Event type |
+| `metadata` | TEXT | NULL | JSON stringified event metadata |
+
+### 3. `agents`
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| `name` | TEXT | PRIMARY KEY | Agent name (e.g. `coding-worker-agent`) |
+| `description` | TEXT | NULL | Agent description |
+| `version` | TEXT | NULL | Semantic version string |
+| `url` | TEXT | NULL | Agent HTTP endpoint URL |
+| `authentication` | TEXT | NULL | JSON stringified auth scheme |
+| `capabilities` | TEXT | NULL | JSON stringified capabilities |
+| `skills` | TEXT | NOT NULL | JSON stringified AgentSkill array |
+| `signature` | TEXT | NULL | JSON stringified cryptographic HMAC signature |
+| `status` | TEXT | NOT NULL | `active` \| `inactive` |
+| `last_heartbeat` | TEXT | NOT NULL | ISO 8601 heartbeat timestamp |
+| `created_at` | TEXT | NOT NULL | ISO 8601 creation timestamp |
+| `updated_at` | TEXT | NOT NULL | ISO 8601 update timestamp |
+
+### 4. `file_changes`
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| `id` | TEXT | PRIMARY KEY | Unique diff ID (e.g. `diff_12345`) |
+| `task_id` | TEXT | NOT NULL, FK(`tasks.id`) | Reference to parent task |
+| `file_path` | TEXT | NOT NULL | Relative target file path |
+| `original_content` | TEXT | NULL | Existing disk content before proposed change |
+| `proposed_content` | TEXT | NULL | AI-generated replacement content |
+| `diff_summary` | TEXT | NULL | Human readable diff summary (added/removed lines) |
+| `status` | TEXT | NOT NULL | `proposed` \| `applied` \| `rejected` |
+| `created_at` | TEXT | NOT NULL | ISO 8601 creation timestamp |
+| `updated_at` | TEXT | NOT NULL | ISO 8601 update timestamp |
 
 ## Coding Skills Supported
 
@@ -56,17 +114,17 @@ Worker agents register Agent Cards specifically advertising:
 
 ## Request & Diff Flow
 
-1. User opens the Electron desktop app and selects a local project folder via `dialog:open-directory`.
-2. The user inputs a coding prompt (e.g. "Add a helper function for validating email").
-3. Desktop client sends the task payload to the API Gateway / Orchestrator.
-4. Orchestrator routes the task to the registered `coding-worker-agent`.
-5. Worker agent analyzes project context, generates code proposals, and streams `diffProposals` back to the desktop UI via SSE.
+1. User selects a local project folder in the desktop client UI.
+2. User submits a coding instruction (e.g. "Add a helper function for validating email").
+3. Desktop client sends the task payload to the API Gateway / Orchestrator (`127.0.0.1:4100`).
+4. Orchestrator records the task in SQLite (`tasks` & `task_events`), enqueues it in the in-process async queue, and routes it to `coding-worker-agent`.
+5. Worker agent executes the task, generates code proposals, records artifacts & file diffs, and streams `diffProposals` back via SSE.
 6. User inspects the side-by-side proposed changes in `DiffViewer`.
-7. Clicking **Apply Changes to Disk** invokes native Electron IPC (`fs:apply-diff`) to apply the diffs to the local file system.
+7. User approves and applies changes to disk.
 
 ## Security Principles
 
 - Cryptographically signed Agent Cards verify worker agent identities.
-- Native Electron IPC bridge exposes scoped filesystem methods (`dialog:open-directory`, `fs:read-tree`, `fs:apply-diff`) with strict context isolation (`contextIsolation: true`).
-- Secrets loaded exclusively from environment/vault files (`.env`), never hardcoded.
+- Secrets loaded exclusively from environment files (`.env`), never hardcoded.
+- Bound to `127.0.0.1` locally only — zero external public network listening sockets.
 - OpenTelemetry tracing across request paths for auditability.
