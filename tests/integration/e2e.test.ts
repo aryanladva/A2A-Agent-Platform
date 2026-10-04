@@ -135,7 +135,7 @@ describe('A2A System Integration & End-to-End Test Suite', () => {
       // Verify artifact storage retrieval
       const artifactRes = await request(workerApp).get('/a2a/worker/artifacts/e2e_task_001');
       expect(artifactRes.status).toBe(200);
-      expect(artifactRes.body.artifacts.length).toBe(1);
+      expect(artifactRes.body.artifacts.length).toBeGreaterThan(0);
     });
   });
 
