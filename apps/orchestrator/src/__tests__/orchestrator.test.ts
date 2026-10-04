@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import request from 'supertest';
-import jwt from 'jsonwebtoken';
 import app from '../app';
 import { config } from '../config';
 import { verifyAgentCardSignature } from '../utils/crypto';
@@ -8,9 +7,7 @@ import { QueueJob } from '../queue/redisTaskQueue';
 import { queueProcessor } from '../queue/queueProcessor';
 import { taskStore } from '../services/taskStore';
 
-describe('Orchestrator A2A Protocol Server & Redis Task Queue', () => {
-  const validToken = jwt.sign({ sub: 'test-client', clientId: 'test-client' }, config.jwtSecret);
-
+describe('Orchestrator A2A Protocol Server & Task Queue', () => {
   describe('Discovery Endpoint', () => {
     it('GET /.well-known/agent.json should return orchestrator signed Agent Card', async () => {
       const res = await request(app).get('/.well-known/agent.json');
@@ -25,40 +22,24 @@ describe('Orchestrator A2A Protocol Server & Redis Task Queue', () => {
     });
   });
 
-  describe('Authentication Middleware', () => {
-    it('should return 401 Unauthorized for /a2a/tasks without Bearer token', async () => {
-      const res = await request(app)
-        .post('/a2a/tasks')
-        .send({
-          skill: 'parse-invoice',
-          input: { fileUrl: 'https://example.com/inv.pdf' },
-        });
-      expect(res.status).toBe(401);
-      expect(res.body.error).toBe('unauthorized');
-    });
-  });
-
-  describe('Redis Task Queue & Async Task Delegation', () => {
+  describe('Task Queue & Async Coding Task Delegation', () => {
     it('POST /a2a/tasks should enqueue job and return status queued (202 Accepted)', async () => {
       const res = await request(app)
         .post('/a2a/tasks')
-        .set('Authorization', `Bearer ${validToken}`)
         .send({
-          skill: 'parse-invoice',
-          input: { fileUrl: 'https://example.com/invoice.pdf' },
+          skill: 'code-generation',
+          input: { instruction: 'Refactor helper function', targetFile: 'src/util.ts' },
           streaming: true,
         });
 
       expect(res.status).toBe(202);
       expect(res.body).toHaveProperty('taskId');
       expect(res.body.status).toBe('queued');
-      expect(res.body.assignedAgent).toBe('invoice-parser-agent');
+      expect(res.body.assignedAgent).toBe('coding-worker-agent');
     });
 
     it('GET /a2a/queue/metrics should return queue status and metrics', async () => {
-      const res = await request(app)
-        .get('/a2a/queue/metrics')
-        .set('Authorization', `Bearer ${validToken}`);
+      const res = await request(app).get('/a2a/queue/metrics');
 
       expect(res.status).toBe(200);
       expect(res.body).toHaveProperty('queued');
@@ -68,7 +49,6 @@ describe('Orchestrator A2A Protocol Server & Redis Task Queue', () => {
     it('should return 404 agent_not_found when no registered agent matches the skill', async () => {
       const res = await request(app)
         .post('/a2a/tasks')
-        .set('Authorization', `Bearer ${validToken}`)
         .send({
           skill: 'unknown-nonexistent-skill',
           input: { query: 'test' },
@@ -102,7 +82,6 @@ describe('Orchestrator A2A Protocol Server & Redis Task Queue', () => {
 
       const res = await request(app)
         .post('/a2a/registry/register')
-        .set('Authorization', `Bearer ${validToken}`)
         .send(tamperedCard);
 
       expect(res.status).toBe(400);
@@ -114,7 +93,6 @@ describe('Orchestrator A2A Protocol Server & Redis Task Queue', () => {
     it('should cancel a queued/in_progress task and update status to cancelled', async () => {
       const createRes = await request(app)
         .post('/a2a/tasks')
-        .set('Authorization', `Bearer ${validToken}`)
         .send({
           skill: 'echo',
           input: { message: 'cancel me' },
@@ -123,16 +101,14 @@ describe('Orchestrator A2A Protocol Server & Redis Task Queue', () => {
       const taskId = createRes.body.taskId;
 
       const cancelRes = await request(app)
-        .post(`/a2a/tasks/${taskId}/cancel`)
-        .set('Authorization', `Bearer ${validToken}`);
+        .post(`/a2a/tasks/${taskId}/cancel`);
 
       expect(cancelRes.status).toBe(200);
       expect(cancelRes.body.status).toBe('cancelled');
 
       // Poll task status to confirm status is cancelled
       const getRes = await request(app)
-        .get(`/a2a/tasks/${taskId}`)
-        .set('Authorization', `Bearer ${validToken}`);
+        .get(`/a2a/tasks/${taskId}`);
 
       expect(getRes.body.status).toBe('cancelled');
     });
@@ -140,7 +116,6 @@ describe('Orchestrator A2A Protocol Server & Redis Task Queue', () => {
     it('should return 409 Conflict when attempting to cancel an already cancelled task', async () => {
       const createRes = await request(app)
         .post('/a2a/tasks')
-        .set('Authorization', `Bearer ${validToken}`)
         .send({
           skill: 'echo',
           input: { message: 'double cancel' },
@@ -149,12 +124,10 @@ describe('Orchestrator A2A Protocol Server & Redis Task Queue', () => {
       const taskId = createRes.body.taskId;
 
       await request(app)
-        .post(`/a2a/tasks/${taskId}/cancel`)
-        .set('Authorization', `Bearer ${validToken}`);
+        .post(`/a2a/tasks/${taskId}/cancel`);
 
       const secondCancelRes = await request(app)
-        .post(`/a2a/tasks/${taskId}/cancel`)
-        .set('Authorization', `Bearer ${validToken}`);
+        .post(`/a2a/tasks/${taskId}/cancel`);
 
       expect(secondCancelRes.status).toBe(409);
       expect(secondCancelRes.body.error).toBe('task_conflict');
@@ -186,8 +159,7 @@ describe('Orchestrator A2A Protocol Server & Redis Task Queue', () => {
 
       // Inspect DLQ endpoint
       const dlqRes = await request(app)
-        .get('/a2a/queue/dead-letter')
-        .set('Authorization', `Bearer ${validToken}`);
+        .get('/a2a/queue/dead-letter');
 
       expect(dlqRes.status).toBe(200);
       expect(dlqRes.body.jobs.length).toBeGreaterThan(0);

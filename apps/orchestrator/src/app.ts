@@ -3,7 +3,6 @@ import cors from 'cors';
 import wellKnownRouter from './routes/wellKnown';
 import tasksRouter from './routes/tasks';
 import registryRouter from './routes/registry';
-import { authMiddleware } from './middleware/auth';
 import { initDb } from './db/connection';
 import { agentRegistry } from './services/agentRegistry';
 
@@ -30,10 +29,8 @@ app.get('/health', (req: Request, res: Response) => {
   });
 });
 
-// Protected A2A Task Endpoints
-app.use(authMiddleware);
+// A2A Task Endpoints
 app.use(tasksRouter);
-
 
 // 404 Handler
 app.use((req: Request, res: Response) => {

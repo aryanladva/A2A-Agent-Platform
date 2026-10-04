@@ -4,7 +4,7 @@ dotenv.config();
 
 export interface OrchestratorConfig {
   port: number;
-  jwtSecret: string;
+  host: string;
   agentCardSigningKey: string;
   redisUrl: string;
   databaseUrl: string;
@@ -13,7 +13,7 @@ export interface OrchestratorConfig {
 
 export const config: OrchestratorConfig = {
   port: parseInt(process.env.ORCHESTRATOR_PORT || '4100', 10),
-  jwtSecret: process.env.JWT_SECRET || 'dev-secret-key-change-in-prod',
+  host: process.env.ORCHESTRATOR_HOST || '127.0.0.1',
   agentCardSigningKey: process.env.AGENT_CARD_SIGNING_KEY || 'orchestrator-signing-key-secret',
   redisUrl: process.env.REDIS_URL || 'redis://localhost:6379',
   databaseUrl:

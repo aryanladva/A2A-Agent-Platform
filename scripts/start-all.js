@@ -150,22 +150,10 @@ async function main() {
   }
   console.log('✅ API Gateway service is UP and healthy!');
 
-  // Step 6: Frontend App
-  console.log('\n💻 Step 5/5: Launching Next.js Frontend UI (port 3000)...');
-  startService('Frontend UI', 'npx', ['pnpm', '--filter', 'frontend', 'dev']);
-  const frontendReady = await waitForHttp('http://localhost:3000', 45);
-
-  if (!frontendReady) {
-    console.warn('⚠️  Frontend UI took longer than expected to bind, continuing background startup...');
-  } else {
-    console.log('✅ Frontend UI is UP and healthy!');
-  }
-
   // Final Summary Banner
   console.log('\n============================================================');
   console.log('🎉 ALL A2A PLATFORM SERVICES ARE LIVE & READY!');
   console.log('============================================================');
-  console.log('💻 Frontend UI Dashboard:       http://localhost:3000');
   console.log('🛡️  API Gateway Health Check:   http://localhost:4000/health');
   console.log('🤖 Orchestrator Agent Card:     http://localhost:4100/.well-known/agent.json');
   console.log('⚡ Worker Agent Card:           http://localhost:4200/.well-known/agent.json');

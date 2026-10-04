@@ -2,10 +2,7 @@ import express, { Express, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import { correlationIdMiddleware } from './middleware/correlationId';
 import { loggerMiddleware } from './middleware/logger';
-import { authMiddleware } from './middleware/auth';
-import { rateLimiterMiddleware } from './middleware/rateLimiter';
 import healthRouter from './routes/health';
-import authRouter from './routes/auth';
 
 const app: Express = express();
 
@@ -17,22 +14,8 @@ app.use(express.urlencoded({ extended: true }));
 app.use(correlationIdMiddleware);
 app.use(loggerMiddleware);
 
-// Public Endpoints
+// Health Check Endpoint
 app.use(healthRouter);
-app.use(authRouter);
-
-// Protected Gateway Routes
-app.use('/api', authMiddleware, rateLimiterMiddleware);
-app.use('/a2a', authMiddleware, rateLimiterMiddleware);
-
-// Sample Protected Route
-app.get('/api/v1/protected', (req: Request, res: Response) => {
-  res.status(200).json({
-    message: 'Access granted to protected resource',
-    client: req.user,
-    correlationId: req.correlationId,
-  });
-});
 
 // 404 Handler
 app.use((req: Request, res: Response) => {

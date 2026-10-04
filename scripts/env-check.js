@@ -36,24 +36,16 @@ function checkEnv() {
 
   const requiredVars = [
     { name: 'GATEWAY_PORT', desc: 'Port the gateway listens on (default 4000)' },
-    { name: 'JWT_SECRET', desc: 'Signing secret for JWTs' },
-    { name: 'OAUTH_CLIENT_ID', desc: 'OAuth2 client ID' },
-    { name: 'OAUTH_CLIENT_SECRET', desc: 'OAuth2 client secret' },
-    { name: 'RATE_LIMIT_PER_MIN', desc: 'Requests allowed per client per minute' },
     { name: 'ORCHESTRATOR_PORT', desc: 'Port the orchestrator listens on (default 4100)' },
-    { name: 'REDIS_URL', desc: 'Redis connection string (e.g. redis://localhost:6379)' },
-    { name: 'DATABASE_URL', desc: 'Postgres connection string' },
     { name: 'AGENT_CARD_SIGNING_KEY', desc: 'Private key used to sign Agent Cards' },
     { name: 'WORKER_PORT', desc: 'Port worker listens on (default 4200)' },
-    { name: 'LLM_PROVIDER', desc: 'LLM provider name (e.g. anthropic, openai, mock)' },
-    { name: 'LLM_API_KEY', desc: 'API key for chosen LLM provider' },
+    { name: 'LLM_PROVIDER', desc: 'LLM provider name (e.g. ollama, anthropic, openai, mock)' },
     { name: 'ORCHESTRATOR_URL', desc: 'URL of orchestrator service to register with' },
     { name: 'NODE_ENV', desc: 'Node environment (development | production)' },
-    { name: 'OTEL_EXPORTER_ENDPOINT', desc: 'OpenTelemetry collector endpoint' },
   ];
 
   const missing = requiredVars.filter(
-    (v) => !combinedEnv[v.name] || combinedEnv[v.name].trim() === ''
+    (v) => combinedEnv[v.name] === undefined || combinedEnv[v.name] === null || combinedEnv[v.name].trim() === ''
   );
 
   if (missing.length > 0) {

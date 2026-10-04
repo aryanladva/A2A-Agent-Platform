@@ -1,43 +1,18 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import request from 'supertest';
-import jwt from 'jsonwebtoken';
 import gatewayApp from '../../apps/gateway/src/app';
 import orchestratorApp from '../../apps/orchestrator/src/app';
 import workerApp from '../../apps/agent-worker/src/app';
-import { config as gatewayConfig } from '../../apps/gateway/src/config';
 import { config as orchestratorConfig } from '../../apps/orchestrator/src/config';
 import { signAgentCard } from '../../apps/orchestrator/src/utils/crypto';
-
 import { executeLlmTask } from '../../apps/agent-worker/src/llm/provider';
 
 describe('A2A System Integration & End-to-End Test Suite', () => {
-  let authToken: string;
-
-  beforeAll(async () => {
-    // Acquire OAuth token via Gateway
-    const tokenRes = await request(gatewayApp).post('/oauth/token').send({
-      client_id: gatewayConfig.oauthClientId,
-      client_secret: gatewayConfig.oauthClientSecret,
-    });
-
-    expect(tokenRes.status).toBe(200);
-    authToken = tokenRes.body.access_token;
-  });
-
-  describe('1. Authentication & Security Enforcement', () => {
-    it('should reject unauthenticated requests to protected endpoints', async () => {
-      const res = await request(gatewayApp).get('/api/v1/protected');
-      expect(res.status).toBe(401);
-      expect(res.body.error).toBe('unauthorized');
-    });
-
-    it('should reject requests with invalid JWT tokens', async () => {
-      const invalidToken = jwt.sign({ sub: 'unauthorized-user' }, 'invalid-secret-key');
-      const res = await request(gatewayApp)
-        .get('/api/v1/protected')
-        .set('Authorization', `Bearer ${invalidToken}`);
-      expect(res.status).toBe(401);
-      expect(res.body.error).toBe('unauthorized');
+  describe('1. Gateway Health & Correlation ID Enforcement', () => {
+    it('should return 200 OK on gateway health endpoint', async () => {
+      const res = await request(gatewayApp).get('/health');
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('ok');
     });
 
     it('should attach and preserve correlation IDs across Gateway requests', async () => {
@@ -67,7 +42,6 @@ describe('A2A System Integration & End-to-End Test Suite', () => {
 
       const res = await request(orchestratorApp)
         .post('/a2a/registry/register')
-        .set('Authorization', `Bearer ${authToken}`)
         .send(fakeCard);
 
       expect(res.status).toBe(400);
@@ -97,7 +71,6 @@ describe('A2A System Integration & End-to-End Test Suite', () => {
 
       const res = await request(orchestratorApp)
         .post('/a2a/registry/register')
-        .set('Authorization', `Bearer ${authToken}`)
         .send(signedCard);
 
       expect(res.status).toBe(201);
@@ -109,7 +82,6 @@ describe('A2A System Integration & End-to-End Test Suite', () => {
     it('should route task to correct worker agent matching the requested skill', async () => {
       const res = await request(orchestratorApp)
         .post('/a2a/tasks')
-        .set('Authorization', `Bearer ${authToken}`)
         .send({
           skill: 'e2e-mock-skill',
           input: { testKey: 'testValue' },
@@ -123,7 +95,6 @@ describe('A2A System Integration & End-to-End Test Suite', () => {
     it('should return 404 agent_not_found for unregistered or unreachable skills', async () => {
       const res = await request(orchestratorApp)
         .post('/a2a/tasks')
-        .set('Authorization', `Bearer ${authToken}`)
         .send({
           skill: 'non-existent-skill-999',
           input: {},
@@ -134,18 +105,18 @@ describe('A2A System Integration & End-to-End Test Suite', () => {
     });
   });
 
-  describe('4. Mock Worker Agent Execution (--mock flag)', () => {
-    it('should execute tasks in mock mode and return canned responses without LLM call', async () => {
+  describe('4. Mock Worker Agent Execution (Coding Skills)', () => {
+    it('should execute code-generation tasks and return diff proposals', async () => {
       const mockResult = await executeLlmTask(
-        'parse-invoice',
-        { fileUrl: 'https://example.com/invoice.pdf' },
+        'code-generation',
+        { targetFile: 'src/index.ts', instruction: 'Refactor code' },
         true,
         'mock',
         'mock-api-key'
       );
 
-      expect(mockResult.text).toContain('invoice line items');
-      expect(mockResult.structuredData).toHaveProperty('vendorName', 'Acme Corp');
+      expect(mockResult.text).toContain('Generated code refactoring');
+      expect(mockResult.diffProposals).toBeDefined();
     });
 
     it('should execute task via Worker HTTP endpoint and persist artifact', async () => {
@@ -153,8 +124,8 @@ describe('A2A System Integration & End-to-End Test Suite', () => {
         .post('/a2a/worker/execute')
         .send({
           taskId: 'e2e_task_001',
-          skill: 'parse-invoice',
-          input: { fileUrl: 'https://example.com/test.pdf' },
+          skill: 'code-generation',
+          input: { targetFile: 'src/index.ts', instruction: 'Add feature' },
         });
 
       expect(res.status).toBe(200);
@@ -172,7 +143,6 @@ describe('A2A System Integration & End-to-End Test Suite', () => {
     it('should delegate task through Orchestrator and allow polling status until completed', async () => {
       const createRes = await request(orchestratorApp)
         .post('/a2a/tasks')
-        .set('Authorization', `Bearer ${authToken}`)
         .send({
           skill: 'echo',
           input: { query: 'E2E full flow message' },
@@ -183,8 +153,7 @@ describe('A2A System Integration & End-to-End Test Suite', () => {
 
       // Poll task status
       const pollRes = await request(orchestratorApp)
-        .get(`/a2a/tasks/${taskId}`)
-        .set('Authorization', `Bearer ${authToken}`);
+        .get(`/a2a/tasks/${taskId}`);
 
       expect(pollRes.status).toBe(200);
       expect(pollRes.body).toHaveProperty('status');
@@ -194,7 +163,6 @@ describe('A2A System Integration & End-to-End Test Suite', () => {
     it('should stream task progress via SSE endpoint', async () => {
       const createRes = await request(orchestratorApp)
         .post('/a2a/tasks')
-        .set('Authorization', `Bearer ${authToken}`)
         .send({
           skill: 'echo',
           input: { text: 'SSE test' },
@@ -204,8 +172,7 @@ describe('A2A System Integration & End-to-End Test Suite', () => {
       const taskId = createRes.body.taskId;
 
       const sseRes = await request(orchestratorApp)
-        .get(`/a2a/tasks/${taskId}/stream`)
-        .set('Authorization', `Bearer ${authToken}`);
+        .get(`/a2a/tasks/${taskId}/stream`);
 
       expect(sseRes.status).toBe(200);
       expect(sseRes.headers['content-type']).toContain('text/event-stream');
