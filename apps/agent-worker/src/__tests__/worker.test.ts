@@ -4,6 +4,8 @@ import app from '../app';
 import { sanitizeLlmInput } from '../security/sanitizer';
 import { executeLlmTask } from '../llm/provider';
 import { isDockerAvailable } from '../sandbox/dockerSandbox';
+import { setSecureApiKey, getSecureApiKey, deleteSecureApiKey } from '../security/credentials';
+import { getLlmAdapter, executeGatewayCompletion } from '../llm/adapters';
 
 describe('Worker Agent', () => {
   describe('Discovery Endpoint & Signed Agent Card', () => {
@@ -68,6 +70,42 @@ describe('Worker Agent', () => {
 
       expect(result.text).toContain('Sandboxed execution complete');
       expect(result.structuredData).toHaveProperty('exitCode', 0);
+    });
+  });
+
+  describe('OS Credential Vault & LLM Gateway Adapters', () => {
+    it('should store, retrieve, and delete API keys securely in OS vault', async () => {
+      const testProvider = 'test_provider_keytar';
+      const testKey = 'sk-secure-test-key-1234567890';
+
+      const saved = await setSecureApiKey(testProvider, testKey);
+      expect(saved).toBe(true);
+
+      const retrieved = await getSecureApiKey(testProvider);
+      expect(retrieved).toBe(testKey);
+
+      const deleted = await deleteSecureApiKey(testProvider);
+      expect(deleted).toBe(true);
+    });
+
+    it('getLlmAdapter should return registered provider adapters (Anthropic, OpenAI, Ollama, Mock)', () => {
+      const anthropicAdapter = getLlmAdapter('anthropic');
+      expect(anthropicAdapter.name).toBe('anthropic');
+
+      const openaiAdapter = getLlmAdapter('openai');
+      expect(openaiAdapter.name).toBe('openai');
+
+      const ollamaAdapter = getLlmAdapter('ollama');
+      expect(ollamaAdapter.name).toBe('ollama');
+
+      const mockAdapter = getLlmAdapter('unknown-provider');
+      expect(mockAdapter.name).toBe('mock');
+    });
+
+    it('executeGatewayCompletion should complete execution via Mock adapter', async () => {
+      const res = await executeGatewayCompletion('Write hello world', { provider: 'mock' });
+      expect(res.provider).toBe('mock');
+      expect(res.text).toContain('[Mock LLM Output]');
     });
   });
 
