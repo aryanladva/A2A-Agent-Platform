@@ -1,3 +1,5 @@
+import { isDockerAvailable, runInDockerSandbox } from '../sandbox/dockerSandbox';
+
 export interface LlmExecutionResult {
   text: string;
   structuredData: Record<string, unknown>;
@@ -44,13 +46,76 @@ export async function executeLlmTask(
   }
 
   if (skill === 'code-runner') {
+    const dockerReady = await isDockerAvailable();
+    const forceDockerCheck = input.requireDockerCheck === true || process.env.REQUIRE_DOCKER_TEST === 'true';
+
+    // Per SANDBOX.md: If Docker isn't running, block ONLY the Debug/Test agent (code-runner)
+    if (!dockerReady && (!isMock || forceDockerCheck)) {
+      return {
+        text: `[Sandbox Error] Docker is not installed or running. Code execution (Debug/Test agent) requires Docker. Please start Docker and try again.`,
+        structuredData: {
+          skill: 'code-runner',
+          error: 'docker_unavailable',
+          status: 'blocked',
+          message:
+            'Docker is not installed or running. Code execution (Debug/Test agent) requires Docker. Please start Docker and try again.',
+        },
+      };
+    }
+
+    if (isMock && !dockerReady && !forceDockerCheck) {
+      return {
+        text: `Sandboxed execution complete for ${targetFile}.\nStandard Output:\n> Running test suite...\n> 5/5 tests passed in 42ms. Clean exit (0).`,
+        structuredData: {
+          skill: 'code-runner',
+          exitCode: 0,
+          stdout: 'Running test suite...\n5/5 tests passed in 42ms.',
+          stderr: '',
+          sandbox: {
+            dockerAvailable: false,
+            mock: true,
+            limits: { cpus: 2, memory: '2g', timeoutSeconds: 60, network: 'none' },
+          },
+        },
+      };
+    }
+
+    // Execute within short-lived Docker container with resource limits & volume isolation
+    const sandboxResult = await runInDockerSandbox({
+      projectPath: (input.projectPath as string) || process.cwd(),
+      command: (input.command as string) || (input.testCommand as string) || 'npm test',
+      timeoutSeconds: (input.timeoutSeconds as number) || 60,
+      cpus: (input.cpus as number) || 2,
+      memory: (input.memory as string) || '2g',
+      allowNetwork: (input.allowNetwork as boolean) || false,
+    });
+
+    if (!sandboxResult.dockerAvailable) {
+      return {
+        text: `[Sandbox Error] ${sandboxResult.error}`,
+        structuredData: {
+          skill: 'code-runner',
+          error: 'docker_unavailable',
+          status: 'blocked',
+          message: sandboxResult.error,
+        },
+      };
+    }
+
     return {
-      text: `Sandboxed execution complete for ${targetFile}.\nStandard Output:\n> Running test suite...\n> 5/5 tests passed in 42ms. Clean exit (0).`,
+      text: sandboxResult.success
+        ? `Sandboxed execution complete for ${targetFile}.\nExit Code: ${sandboxResult.exitCode}\nDuration: ${sandboxResult.durationMs}ms\nStandard Output:\n${sandboxResult.stdout}`
+        : `Sandboxed execution failed for ${targetFile}.\nExit Code: ${sandboxResult.exitCode}\nDuration: ${sandboxResult.durationMs}ms\nError:\n${sandboxResult.stderr || sandboxResult.error}`,
       structuredData: {
         skill: 'code-runner',
-        exitCode: 0,
-        stdout: 'Running test suite...\n5/5 tests passed in 42ms.',
-        stderr: '',
+        exitCode: sandboxResult.exitCode,
+        stdout: sandboxResult.stdout,
+        stderr: sandboxResult.stderr,
+        durationMs: sandboxResult.durationMs,
+        sandbox: {
+          dockerAvailable: true,
+          limits: { cpus: 2, memory: '2g', timeoutSeconds: 60, network: 'none' },
+        },
       },
     };
   }

@@ -3,6 +3,7 @@ import request from 'supertest';
 import app from '../app';
 import { sanitizeLlmInput } from '../security/sanitizer';
 import { executeLlmTask } from '../llm/provider';
+import { isDockerAvailable } from '../sandbox/dockerSandbox';
 
 describe('Worker Agent', () => {
   describe('Discovery Endpoint & Signed Agent Card', () => {
@@ -67,6 +68,52 @@ describe('Worker Agent', () => {
 
       expect(result.text).toContain('Sandboxed execution complete');
       expect(result.structuredData).toHaveProperty('exitCode', 0);
+    });
+  });
+
+  describe('Execution Sandbox (SANDBOX.md)', () => {
+    it('isDockerAvailable should return a boolean', async () => {
+      const available = await isDockerAvailable();
+      expect(typeof available).toBe('boolean');
+    });
+
+    it('should block code-runner skill with explicit error if Docker is unavailable', async () => {
+      const result = await executeLlmTask(
+        'code-runner',
+        { targetFile: 'tests/main.test.ts', requireDockerCheck: true },
+        true,
+        'mock',
+        'mock-key'
+      );
+
+      const dockerReady = await isDockerAvailable();
+      if (!dockerReady) {
+        expect(result.text).toContain('[Sandbox Error] Docker is not installed or running');
+        expect(result.structuredData.status).toBe('blocked');
+        expect(result.structuredData.error).toBe('docker_unavailable');
+      } else {
+        expect(result.structuredData.skill).toBe('code-runner');
+      }
+    });
+
+    it('should allow code-generation and code-review without requiring Docker', async () => {
+      const codegenResult = await executeLlmTask(
+        'code-generation',
+        { targetFile: 'src/index.ts', instruction: 'Build auth module', requireDockerCheck: true },
+        true,
+        'mock',
+        'mock-key'
+      );
+      expect(codegenResult.structuredData.status).toBe('diff_proposed');
+
+      const reviewResult = await executeLlmTask(
+        'code-review',
+        { projectPath: 'my-project', requireDockerCheck: true },
+        true,
+        'mock',
+        'mock-key'
+      );
+      expect(reviewResult.structuredData.skill).toBe('code-review');
     });
   });
 
