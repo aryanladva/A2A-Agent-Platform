@@ -24,13 +24,13 @@ export class SqliteAgentRegistryService {
   }
 
   private initDefaultAgents(): void {
+    const baseUrl = 'http://127.0.0.1:4200';
     const defaultAgents: Array<Omit<AgentCard, 'signature'>> = [
       {
-        name: 'coding-worker-agent',
-        description:
-          'Desktop AI coding agent executing code generation, refactoring, sandboxed execution, git operations, and local file diffs',
+        name: 'codegen-agent',
+        description: 'CodeGen Agent — generate and refactor code in the selected project',
         version: '1.0.0',
-        url: 'http://127.0.0.1:4200',
+        url: baseUrl,
         authentication: { schemes: [] },
         capabilities: { streaming: true, pushNotifications: false },
         maxConcurrency: 5,
@@ -38,42 +38,61 @@ export class SqliteAgentRegistryService {
           {
             id: 'code-generation',
             name: 'Code Generation & Refactoring',
-            description: 'Generates, refactors, and updates code based on instructions and project context',
+            description: 'Generates and refactors code in the selected project folder',
             inputModes: ['application/json'],
             outputModes: ['application/json'],
           },
+        ],
+      },
+      {
+        name: 'debug-test-agent',
+        description: 'Debug/Test Agent — run tests, analyze failures, suggest fixes',
+        version: '1.0.0',
+        url: baseUrl,
+        authentication: { schemes: [] },
+        capabilities: { streaming: true, pushNotifications: false },
+        maxConcurrency: 5,
+        skills: [
           {
             id: 'code-runner',
-            name: 'Sandboxed Execution & Debugging',
-            description: 'Runs code snippets and tests in a sandboxed environment to inspect output and debug errors',
+            name: 'Sandboxed Test Runner & Debugger',
+            description: 'Runs tests, analyzes failures, and suggests fixes in sandboxed context',
             inputModes: ['application/json'],
             outputModes: ['application/json'],
           },
+        ],
+      },
+      {
+        name: 'git-ops-agent',
+        description: 'Git-ops Agent — status, diff, commit, branch, stage changes',
+        version: '1.0.0',
+        url: baseUrl,
+        authentication: { schemes: [] },
+        capabilities: { streaming: true, pushNotifications: false },
+        maxConcurrency: 5,
+        skills: [
           {
             id: 'git-operations',
             name: 'Git Operations',
-            description: 'Performs local git commands (status, diff, commit, branch management)',
+            description: 'Performs git status, diff, commit, branch management, and stage changes',
             inputModes: ['application/json'],
             outputModes: ['application/json'],
           },
-          {
-            id: 'file-operations',
-            name: 'Local Workspace File Operations',
-            description: 'Reads and writes files in a selected local project folder',
-            inputModes: ['application/json'],
-            outputModes: ['application/json'],
-          },
+        ],
+      },
+      {
+        name: 'review-agent',
+        description: 'Review Agent — explain code, flag issues, suggest improvements',
+        version: '1.0.0',
+        url: baseUrl,
+        authentication: { schemes: [] },
+        capabilities: { streaming: true, pushNotifications: false },
+        maxConcurrency: 5,
+        skills: [
           {
             id: 'code-review',
             name: 'Code Review & Explanation',
-            description: 'Reviews pull requests, code diffs, and provides explanations/suggestions',
-            inputModes: ['application/json'],
-            outputModes: ['application/json'],
-          },
-          {
-            id: 'echo',
-            name: 'Echo input',
-            description: 'Echoes input parameters for testing',
+            description: 'Explains code, flags issues, and suggests architectural and security improvements',
             inputModes: ['application/json'],
             outputModes: ['application/json'],
           },
@@ -139,8 +158,6 @@ export class SqliteAgentRegistryService {
 
   public canAgentAcceptTask(agentName: string): boolean {
     const active = this.inMemoryConcurrency.get(agentName) || 0;
-    const db = getSqliteDb();
-    const row = db.prepare('SELECT capabilities, skills FROM agents WHERE name = ?').get(agentName) as { capabilities?: string; skills?: string } | undefined;
     const limit = this.defaultMaxConcurrency;
     return active < limit;
   }

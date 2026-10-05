@@ -96,7 +96,7 @@ describe('Worker Agent', () => {
         .post('/a2a/worker/execute')
         .send({
           taskId: 'task_stream_456',
-          skill: 'echo',
+          skill: 'code-generation',
           input: { message: 'streaming test' },
           streaming: true,
         });

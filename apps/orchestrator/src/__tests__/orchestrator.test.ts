@@ -35,7 +35,7 @@ describe('Orchestrator A2A Protocol Server & Task Queue', () => {
       expect(res.status).toBe(202);
       expect(res.body).toHaveProperty('taskId');
       expect(res.body.status).toBe('queued');
-      expect(res.body.assignedAgent).toBe('coding-worker-agent');
+      expect(res.body.assignedAgent).toBe('codegen-agent');
     });
 
     it('GET /a2a/queue/metrics should return queue status and metrics', async () => {
@@ -94,7 +94,7 @@ describe('Orchestrator A2A Protocol Server & Task Queue', () => {
       const createRes = await request(app)
         .post('/a2a/tasks')
         .send({
-          skill: 'echo',
+          skill: 'code-generation',
           input: { message: 'cancel me' },
         });
 
@@ -117,7 +117,7 @@ describe('Orchestrator A2A Protocol Server & Task Queue', () => {
       const createRes = await request(app)
         .post('/a2a/tasks')
         .send({
-          skill: 'echo',
+          skill: 'code-generation',
           input: { message: 'double cancel' },
         });
 

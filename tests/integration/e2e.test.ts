@@ -144,7 +144,7 @@ describe('A2A System Integration & End-to-End Test Suite', () => {
       const createRes = await request(orchestratorApp)
         .post('/a2a/tasks')
         .send({
-          skill: 'echo',
+          skill: 'code-generation',
           input: { query: 'E2E full flow message' },
         });
 
@@ -164,7 +164,7 @@ describe('A2A System Integration & End-to-End Test Suite', () => {
       const createRes = await request(orchestratorApp)
         .post('/a2a/tasks')
         .send({
-          skill: 'echo',
+          skill: 'code-generation',
           input: { text: 'SSE test' },
           streaming: true,
         });
