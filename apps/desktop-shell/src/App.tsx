@@ -1,11 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Header } from './components/Header';
 import { FileTree } from './components/FileTree';
 import { TaskPanel } from './components/TaskPanel';
 import { DiffViewer } from './components/DiffViewer';
 import { CodingSkillId, DiffProposal, FileTreeNode, TaskMessage, TaskStatusType } from './types';
 import { openDirectoryPicker, scanDirectoryTree, applyDiffToDisk } from './services/tauriFs';
-import { submitCodingTask } from './services/api';
+import { submitCodingTask, fetchSupervisorStatus, ServiceStatusInfo } from './services/api';
 
 export const App: React.FC = () => {
   const [projectPath, setProjectPath] = useState<string | null>(null);
@@ -15,6 +15,18 @@ export const App: React.FC = () => {
   const [messages, setMessages] = useState<TaskMessage[]>([]);
   const [currentStatus, setCurrentStatus] = useState<TaskStatusType | null>(null);
   const [activeDiffs, setActiveDiffs] = useState<DiffProposal[]>([]);
+  const [serviceStatuses, setServiceStatuses] = useState<ServiceStatusInfo[]>([]);
+
+  useEffect(() => {
+    const checkServices = async () => {
+      const statuses = await fetchSupervisorStatus();
+      setServiceStatuses(statuses);
+    };
+
+    checkServices();
+    const interval = setInterval(checkServices, 5000);
+    return () => clearInterval(interval);
+  }, []);
 
   const handleSelectProject = async () => {
     const selected = await openDirectoryPicker();
@@ -108,6 +120,7 @@ export const App: React.FC = () => {
         onSelectProject={handleSelectProject}
         selectedSkill={selectedSkill}
         onSkillChange={setSelectedSkill}
+        serviceStatuses={serviceStatuses}
       />
 
       {/* Main Workspace (Left Sidebar + Center Chat/Task Panel) */}

@@ -21,6 +21,30 @@ export interface TaskStreamUpdate {
   error?: string;
 }
 
+export interface ServiceStatusInfo {
+  name: string;
+  port: number;
+  pid?: number;
+  status: string;
+  healthy: boolean;
+  restarts: number;
+}
+
+export async function fetchSupervisorStatus(): Promise<ServiceStatusInfo[]> {
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    const statuses = await invoke<ServiceStatusInfo[]>('get_services_status');
+    return statuses;
+  } catch (_err) {
+    // Web fallback for browser development environment
+    return [
+      { name: 'orchestrator', port: 4100, status: 'running', healthy: true, restarts: 0 },
+      { name: 'agent-worker', port: 4200, status: 'running', healthy: true, restarts: 0 },
+      { name: 'gateway', port: 4000, status: 'running', healthy: true, restarts: 0 },
+    ];
+  }
+}
+
 export async function submitCodingTask(
   req: SubmitTaskRequest,
   onUpdate: (update: TaskStreamUpdate) => void

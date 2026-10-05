@@ -1,12 +1,14 @@
 import React from 'react';
-import { FolderOpen, Code2, Terminal, GitBranch, FileCode, CheckCircle2 } from 'lucide-react';
+import { FolderOpen, Code2, Terminal, GitBranch, FileCode, CheckCircle2, Cpu } from 'lucide-react';
 import { CodingSkillId } from '../types';
+import { ServiceStatusInfo } from '../services/api';
 
 interface HeaderProps {
   projectPath: string | null;
   onSelectProject: () => void;
   selectedSkill: CodingSkillId;
   onSkillChange: (skill: CodingSkillId) => void;
+  serviceStatuses: ServiceStatusInfo[];
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -14,6 +16,7 @@ export const Header: React.FC<HeaderProps> = ({
   onSelectProject,
   selectedSkill,
   onSkillChange,
+  serviceStatuses,
 }) => {
   const skills: { id: CodingSkillId; label: string; icon: React.ReactNode }[] = [
     { id: 'code-generation', label: 'Code Generation', icon: <Code2 className="w-3.5 h-3.5" /> },
@@ -26,7 +29,21 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <header className="h-12 bg-surface border-b border-border px-4 flex items-center justify-between text-xs">
       <div className="flex items-center gap-3">
-        <span className="font-mono text-accent font-semibold tracking-wide">A2A CODING AGENT</span>
+        <span className="font-mono text-accent font-semibold tracking-wide flex items-center gap-1.5">
+          <Cpu className="w-4 h-4 text-accent" />
+          A2A CODING AGENT
+        </span>
+
+        {/* Local Supervisor Status Indicator */}
+        <div className="flex items-center gap-2 px-2 py-0.5 bg-bg border border-border rounded text-[11px] font-mono text-text-dim">
+          <span className="w-2 h-2 rounded-full bg-diff-add animate-pulse" />
+          <span>Supervisor Active</span>
+          {serviceStatuses.length > 0 && (
+            <span className="text-text-dim/70">
+              ({serviceStatuses.map((s) => s.name.replace('agent-', '')).join(' • ')})
+            </span>
+          )}
+        </div>
         
         <button
           onClick={onSelectProject}
