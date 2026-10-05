@@ -5,7 +5,7 @@ import { TaskPanel } from './components/TaskPanel';
 import { DiffViewer } from './components/DiffViewer';
 import { CodingSkillId, DiffProposal, FileTreeNode, TaskMessage, TaskStatusType } from './types';
 import { openDirectoryPicker, scanDirectoryTree, applyDiffToDisk } from './services/tauriFs';
-import { submitCodingTask, fetchSupervisorStatus, ServiceStatusInfo } from './services/api';
+import { submitCodingTask, fetchSupervisorStatus, approveDiff, rejectDiff, ServiceStatusInfo } from './services/api';
 
 export const App: React.FC = () => {
   const [projectPath, setProjectPath] = useState<string | null>(null);
@@ -86,8 +86,9 @@ export const App: React.FC = () => {
           })
         );
 
-        if (update.result?.diffProposals && update.result.diffProposals.length > 0) {
-          setActiveDiffs(update.result.diffProposals);
+        const proposedDiffs = update.result?.fileChanges || update.result?.diffProposals;
+        if (proposedDiffs && proposedDiffs.length > 0) {
+          setActiveDiffs(proposedDiffs);
         }
       }
     );
@@ -95,7 +96,16 @@ export const App: React.FC = () => {
 
   const handleApproveDiff = async (diff: DiffProposal) => {
     if (!projectPath) return;
-    const success = await applyDiffToDisk(projectPath, diff.filePath, diff.proposedContent);
+
+    let success = false;
+    if (diff.id) {
+      // Per-file user approval via backend storage layer
+      success = await approveDiff(diff.id, projectPath);
+    } else {
+      // Fallback local FS write via Tauri
+      success = await applyDiffToDisk(projectPath, diff.filePath, diff.proposedContent);
+    }
+
     if (success) {
       setActiveDiffs((prev) =>
         prev.map((d) => (d.filePath === diff.filePath ? { ...d, status: 'applied' } : d))
@@ -106,7 +116,11 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleRejectDiff = (diff: DiffProposal) => {
+  const handleRejectDiff = async (diff: DiffProposal) => {
+    if (diff.id) {
+      await rejectDiff(diff.id);
+    }
+
     setActiveDiffs((prev) =>
       prev.map((d) => (d.filePath === diff.filePath ? { ...d, status: 'rejected' } : d))
     );

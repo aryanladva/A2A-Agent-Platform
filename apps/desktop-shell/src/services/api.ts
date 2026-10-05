@@ -1,6 +1,5 @@
 import { CodingSkillId, DiffProposal, TaskStatusType } from '../types';
 
-const GATEWAY_URL = 'http://127.0.0.1:4000';
 const ORCHESTRATOR_URL = 'http://127.0.0.1:4100';
 
 export interface SubmitTaskRequest {
@@ -16,6 +15,7 @@ export interface TaskStreamUpdate {
   result?: {
     text?: string;
     diffProposals?: DiffProposal[];
+    fileChanges?: DiffProposal[];
     structuredData?: Record<string, unknown>;
   };
   error?: string;
@@ -108,5 +108,48 @@ export async function submitCodingTask(
       status: 'failed',
       error: (err as Error).message || 'Failed to submit task',
     });
+  }
+}
+
+export async function fetchTaskDiffs(taskId: string): Promise<DiffProposal[]> {
+  try {
+    const res = await fetch(`${ORCHESTRATOR_URL}/a2a/diffs/${taskId}`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.fileChanges || []).map((fc: any) => ({
+      id: fc.id,
+      taskId: fc.taskId,
+      filePath: fc.filePath || fc.file_path,
+      originalContent: fc.originalContent || fc.original_content || '',
+      proposedContent: fc.proposedContent || fc.proposed_content || '',
+      diffSummary: fc.diffSummary || fc.diff_summary || '',
+      status: fc.status || 'proposed',
+    }));
+  } catch (_err) {
+    return [];
+  }
+}
+
+export async function approveDiff(diffId: string, projectPath: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${ORCHESTRATOR_URL}/a2a/diffs/${diffId}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectPath }),
+    });
+    return res.ok;
+  } catch (_err) {
+    return false;
+  }
+}
+
+export async function rejectDiff(diffId: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${ORCHESTRATOR_URL}/a2a/diffs/${diffId}/reject`, {
+      method: 'POST',
+    });
+    return res.ok;
+  } catch (_err) {
+    return false;
   }
 }

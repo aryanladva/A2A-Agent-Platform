@@ -134,6 +134,59 @@ describe('Orchestrator A2A Protocol Server & Task Queue', () => {
     });
   });
 
+  describe('File Changes & Explicit User Approval Layer', () => {
+    it('should store proposed diffs in file_changes SQLite table and approve/apply via API', async () => {
+      const task = taskStore.createTask('code-generation', {}, 'codegen-agent');
+      const changeRecord = taskStore.addFileChange(
+        task.taskId,
+        'src/test-file.ts',
+        '// old content\n',
+        '// new proposed content\n',
+        '+ Added new proposed content'
+      );
+
+      expect(changeRecord.status).toBe('proposed');
+
+      // GET /a2a/diffs/:taskId
+      const getRes = await request(app).get(`/a2a/diffs/${task.taskId}`);
+      expect(getRes.status).toBe(200);
+      expect(getRes.body.fileChanges.length).toBe(1);
+      expect(getRes.body.fileChanges[0].filePath).toBe('src/test-file.ts');
+
+      // POST /a2a/diffs/:diffId/approve
+      const approveRes = await request(app)
+        .post(`/a2a/diffs/${changeRecord.id}/approve`)
+        .send({ projectPath: '.' });
+
+      expect(approveRes.status).toBe(200);
+      expect(approveRes.body.status).toBe('applied');
+
+      // Confirm DB record updated to applied
+      const updatedChange = taskStore.getFileChange(changeRecord.id);
+      expect(updatedChange?.status).toBe('applied');
+    });
+
+    it('should allow rejecting proposed diffs without writing to disk', async () => {
+      const task = taskStore.createTask('code-generation', {}, 'codegen-agent');
+      const changeRecord = taskStore.addFileChange(
+        task.taskId,
+        'src/rejected-file.ts',
+        '// old\n',
+        '// rejected proposal\n',
+        '+ Rejected change'
+      );
+
+      const rejectRes = await request(app)
+        .post(`/a2a/diffs/${changeRecord.id}/reject`);
+
+      expect(rejectRes.status).toBe(200);
+      expect(rejectRes.body.status).toBe('rejected');
+
+      const updatedChange = taskStore.getFileChange(changeRecord.id);
+      expect(updatedChange?.status).toBe('rejected');
+    });
+  });
+
   describe('Queue Processor — Retry Logic & Dead-Letter Queue (DLQ)', () => {
     it('should retry failed job up to maxRetries before sending to Dead-Letter Queue', async () => {
       const failingTask = taskStore.createTask('failing-skill', {}, 'failing-agent');

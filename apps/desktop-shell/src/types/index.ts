@@ -13,6 +13,8 @@ export type CodingSkillId =
   | 'code-review';
 
 export interface DiffProposal {
+  id?: string;
+  taskId?: string;
   filePath: string;
   originalContent: string;
   proposedContent: string;

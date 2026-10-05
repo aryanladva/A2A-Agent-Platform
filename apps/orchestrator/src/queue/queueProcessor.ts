@@ -125,6 +125,25 @@ export class QueueProcessorService {
       }
 
       if (executionSuccess) {
+        // Record all proposed changes in file_changes SQLite table — no agent writes to disk directly
+        const diffProposals =
+          (resultData as any)?.result?.diffProposals || (resultData as any)?.diffProposals || [];
+        const savedChanges = [];
+        for (const prop of diffProposals) {
+          const changeRecord = taskStore.addFileChange(
+            job.taskId,
+            prop.filePath,
+            prop.originalContent || '',
+            prop.proposedContent || '',
+            prop.diffSummary || ''
+          );
+          savedChanges.push(changeRecord);
+        }
+
+        if (savedChanges.length > 0 && typeof resultData === 'object' && resultData !== null) {
+          (resultData as any).fileChanges = savedChanges;
+        }
+
         taskStore.updateTaskStatus(
           job.taskId,
           'completed',

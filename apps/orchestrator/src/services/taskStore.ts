@@ -1,4 +1,6 @@
 import { EventEmitter } from 'events';
+import fs from 'fs';
+import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { TaskStatus, TaskStatusResponse } from '@a2a/shared-types';
 import { getSqliteDb } from '../db/sqlite';
@@ -221,6 +223,24 @@ export class SqliteTaskStoreService extends EventEmitter {
     };
   }
 
+  public getFileChange(diffId: string): FileChangeRecord | undefined {
+    const db = getSqliteDb();
+    const row = db.prepare('SELECT * FROM file_changes WHERE id = ?').get(diffId) as any;
+    if (!row) return undefined;
+
+    return {
+      id: row.id,
+      taskId: row.task_id,
+      filePath: row.file_path,
+      originalContent: row.original_content,
+      proposedContent: row.proposed_content,
+      diffSummary: row.diff_summary,
+      status: row.status,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
   public getFileChangesByTask(taskId: string): FileChangeRecord[] {
     const db = getSqliteDb();
     const rows = db.prepare('SELECT * FROM file_changes WHERE task_id = ?').all(taskId) as any[];
@@ -236,6 +256,45 @@ export class SqliteTaskStoreService extends EventEmitter {
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     }));
+  }
+
+  public updateFileChangeStatus(
+    diffId: string,
+    status: 'applied' | 'rejected',
+    projectPath?: string
+  ): FileChangeRecord {
+    const db = getSqliteDb();
+    const record = this.getFileChange(diffId);
+    if (!record) {
+      throw new Error(`File change with id '${diffId}' not found`);
+    }
+
+    if (record.status !== 'proposed') {
+      throw new Error(`File change '${diffId}' has already been ${record.status}`);
+    }
+
+    // Disk write happens ONLY after explicit per-file user approval
+    if (status === 'applied') {
+      const baseDir = projectPath || process.cwd();
+      const targetPath = path.resolve(baseDir, record.filePath);
+      const parentDir = path.dirname(targetPath);
+      if (!fs.existsSync(parentDir)) {
+        fs.mkdirSync(parentDir, { recursive: true });
+      }
+      fs.writeFileSync(targetPath, record.proposedContent || '', 'utf8');
+    }
+
+    const now = new Date().toISOString();
+    const stmt = db.prepare(`
+      UPDATE file_changes
+      SET status = ?, updated_at = ?
+      WHERE id = ?
+    `);
+    stmt.run(status, now, diffId);
+
+    record.status = status;
+    record.updatedAt = now;
+    return record;
   }
 
   public subscribe(taskId: string, listener: (event: TaskEvent) => void): () => void {

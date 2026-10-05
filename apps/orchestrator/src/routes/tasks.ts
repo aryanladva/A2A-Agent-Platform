@@ -148,6 +148,38 @@ router.get('/a2a/tasks/:taskId/stream', (req: Request, res: Response) => {
   });
 });
 
+// GET /a2a/diffs/:taskId — Retrieve file changes for a task
+router.get('/a2a/diffs/:taskId', (req: Request, res: Response) => {
+  const { taskId } = req.params;
+  const changes = taskStore.getFileChangesByTask(taskId);
+  res.status(200).json({ taskId, fileChanges: changes });
+});
+
+// POST /a2a/diffs/:diffId/approve — Explicit per-file user approval (applies diff to disk)
+router.post('/a2a/diffs/:diffId/approve', (req: Request, res: Response) => {
+  const { diffId } = req.params;
+  const { projectPath } = req.body || {};
+
+  try {
+    const updated = taskStore.updateFileChangeStatus(diffId, 'applied', projectPath);
+    res.status(200).json({ status: 'applied', fileChange: updated });
+  } catch (err) {
+    res.status(400).json({ error: 'approval_failed', message: (err as Error).message });
+  }
+});
+
+// POST /a2a/diffs/:diffId/reject — Reject proposed diff (no write to disk)
+router.post('/a2a/diffs/:diffId/reject', (req: Request, res: Response) => {
+  const { diffId } = req.params;
+
+  try {
+    const updated = taskStore.updateFileChangeStatus(diffId, 'rejected');
+    res.status(200).json({ status: 'rejected', fileChange: updated });
+  } catch (err) {
+    res.status(400).json({ error: 'rejection_failed', message: (err as Error).message });
+  }
+});
+
 // GET /a2a/queue/metrics — Queue & DLQ status
 router.get('/a2a/queue/metrics', async (req: Request, res: Response) => {
   const metrics = await redisTaskQueue.getMetrics();
