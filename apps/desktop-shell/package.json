@@ -2,6 +2,7 @@
   "name": "desktop-shell",
   "version": "0.1.0",
   "private": true,
+  "main": "electron/main.cjs",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,7 +10,22 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "desktop:build": "tsc && vite build && electron-builder --win dir"
+  },
+  "build": {
+    "appId": "com.a2a.codingagent.desktop",
+    "productName": "A2A Desktop Coding Agent",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*"
+    ],
+    "win": {
+      "target": ["dir"]
+    }
   },
   "dependencies": {
     "@a2a/shared-types": "workspace:*",
@@ -29,6 +45,8 @@
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
     "autoprefixer": "^10.4.20",
+    "electron": "^31.2.0",
+    "electron-builder": "^24.13.3",
     "postcss": "^8.4.41",
     "tailwindcss": "^3.4.10",
     "typescript": "^5.5.4",

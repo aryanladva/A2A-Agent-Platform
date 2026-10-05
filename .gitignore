@@ -6,6 +6,8 @@ node_modules/
 dist/
 dist-desktop/
 build/
+release/
+src-tauri/target/
 .next/
 out/
 

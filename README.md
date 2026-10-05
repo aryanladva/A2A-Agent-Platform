@@ -1,81 +1,79 @@
 # A2A Desktop Coding Agent
 
-A desktop application and multi-agent platform for local coding tasks (code generation, refactoring, sandboxed execution, git status/diffs, file tree inspection, and code review) built using Electron, Next.js/React, TailwindCSS, and Google's A2A (Agent2Agent) protocol.
+A native desktop application and local multi-agent platform for coding tasks (code generation, refactoring, sandboxed test running, local git status/diffs, file tree inspection, and code review) built using Tauri / Electron, React, TailwindCSS, embedded SQLite, and Google's A2A (Agent2Agent) protocol.
 
 ## Features
 
-- **Desktop-First Experience**: Native Windows executable shell wrapping the React UI via Electron.
-- **Coding Task Focus**: Restricted worker agent skills:
-  - `code-generation`: Automated code generation and refactoring with diff proposals.
-  - `code-runner`: Sandboxed execution of tests and scripts.
-  - `git-operations`: Local git repository status inspection and branch management.
-  - `file-operations`: Directory hierarchy tree scanning and disk file mutations.
-  - `code-review`: AI code review and diagnostic analysis.
-- **Local Workspace Selector**: Select any local project folder using native OS dialogs.
-- **Interactive File Tree & Diff Viewer**: Inspect proposed code modifications in a side-by-side diff viewer before applying them to disk.
-- **Real-Time Streaming**: Live task status and code proposals streamed directly into the desktop window.
+- **Desktop-First Experience**: Native Windows executable wrapper around the desktop shell UI.
+- **Single-User Local Microservices**: Orchestrator, Worker Agent, and API Gateway bound strictly to `127.0.0.1` locally.
+- **Embedded SQLite Database**: Data persistence (`tasks`, `task_events`, `agents`, `file_changes`) powered by local SQLite (`data/a2a.sqlite`).
+- **Coding-Only Agent Delegation**:
+  - `codegen-agent` (`code-generation` skill): Automated code refactoring emitting proposed diffs.
+  - `debug-test-agent` (`code-runner` skill): Short-lived Docker container execution per task with CPU/RAM/timeout limits and network isolation.
+  - `git-ops-agent` (`git-operations` skill): Local git status, branch checking, and diff analysis.
+  - `review-agent` (`code-review` skill): AI code review and suggestions.
+- **Local Workspace Selector**: Select any project folder using native OS file dialogs.
+- **Zero Silent Disk Writes**: All proposed code changes are stored as diffs in SQLite. Code writes happen exclusively after explicit per-file user approval in the desktop diff viewer.
+- **Unified LLM Gateway**: Configurable completion runner with adapters for Anthropic (Claude 3.5 Sonnet), OpenAI (GPT-4o), local Ollama (Llama 3), and Mock.
+- **Secure OS Credential Vault**: API keys stored in OS-bound encrypted credential storage (`credentials.vault`), preventing plaintext key exposure.
 
 ## Reference Documentation
 
-- `doc/ARCHITECTURE.md` — layer breakdown, desktop app integration, request flow, security principles
-- `doc/AGENT_CARD_SPEC.md` — Agent Card JSON schema for coding worker agents
-- `doc/API_SPEC.md` — orchestrator endpoints, request/response schemas
-- `doc/SECURITY.md` — auth flow, secrets handling, mTLS setup
-- `doc/ENV_SETUP.md` — required environment variables
-- `doc/TESTING.md` — how to run unit and integration tests locally
+- `doc/ARCHITECTURE.md` — system architecture, embedded SQLite schema, desktop shell integration
+- `doc/AGENT_CARD_SPEC.md` — Agent Card spec for coding agents
+- `doc/API_SPEC.md` — orchestrator & gateway endpoints
+- `doc/SANDBOX.md` — short-lived Docker sandbox reference & resource limits
+- `doc/UI_GUIDELINES.md` — desktop layout, color tokens, diff viewer rules
+- `doc/SECURITY.md` — authentication, mTLS, input sanitization
+- `doc/ENV_SETUP.md` — environment configuration
+- `doc/TESTING.md` — unit & integration testing
 - `doc/CHANGELOG.md` — version history
 
 ## Project Structure
 
 ```
 apps/
-  gateway/         # API gateway: auth, rate limiting
-  orchestrator/     # A2A orchestrator: task routing, coding agent registry
-  agent-worker/      # Coding worker agent: executes code tasks, generates diffs
-  frontend/         # Electron desktop app (Next.js static bundle + main process IPC)
+  gateway/          # API gateway: correlation ID tracing, local HTTP proxy
+  orchestrator/     # A2A orchestrator: task queue & SQLite database store
+  agent-worker/     # Coding worker agent: LLM gateway, sandbox runner, diff engine
+  desktop-shell/    # Native Desktop UI shell (React, Tailwind, Tauri / Electron wrapper)
 packages/
-  shared-types/     # Shared TypeScript interfaces across desktop app and services
+  shared-types/     # Shared TypeScript interfaces
 ```
 
-## Running the Desktop Application
+## Running & Building the Desktop App
 
 ### Prerequisites
 - Node.js LTS (v20+) & `pnpm`
-- Docker Desktop (for Redis & Postgres dependencies)
+- Docker Desktop (for sandboxed test running via Debug/Test agent)
 
-### Quick Start
+### Launch Desktop Platform
 ```bash
-# 1. Install dependencies
+# Install dependencies
 pnpm install
 
-# 2. Copy environment file
-cp .env.example .env
-
-# 3. Start database services & launch all background services + Electron desktop app
+# Start background microservices + desktop app
 pnpm run start:all
 ```
 
-### Desktop Specific Commands
+### Build Windows Binary / Installer
 ```bash
-# Launch Electron Desktop app in development mode
-pnpm --filter frontend run desktop:dev
-
-# Package double-clickable Windows installer and unpacked .exe binary
-pnpm --filter frontend run desktop:pack
+# Build desktop executable binary
+pnpm --filter desktop-shell desktop:build
 ```
 
-The compiled binaries will be output to:
-- `apps/frontend/dist-desktop/win-unpacked/A2A Coding Agent Desktop.exe`
-- `apps/frontend/dist-desktop/A2A Coding Agent Desktop Setup 0.1.0.exe`
+The compiled binaries output to:
+- `apps/desktop-shell/release/win-unpacked/A2A Desktop Coding Agent.exe`
 
-## Status
+## Status & Completed Phases
 
-- [x] Phase 1 — Monorepo setup
-- [x] Phase 2 — API gateway
-- [x] Phase 3 — A2A orchestrator core
-- [x] Phase 4 — Agent registry & coding skills
-- [x] Phase 5 — Coding worker agent & diff engine
-- [x] Phase 6 — Task queue
-- [x] Phase 7 — Desktop UI (Electron + React file tree, diff viewer, chat stream)
-- [x] Phase 8 — Security hardening
-- [x] Phase 9 — Windows `.exe` desktop installer build & deployment
+- [x] **Phase 1** — Monorepo setup
+- [x] **Phase 2** — API gateway with correlation ID tracing
+- [x] **Phase 3** — A2A orchestrator core
+- [x] **Phase 4** — Agent registry & signed Agent Cards
+- [x] **Phase 5** — Coding worker agents (CodeGen, Debug/Test, Git-ops, Review)
+- [x] **Phase 6** — In-process async task queue
+- [x] **Phase 7** — Native Desktop Shell UI (file tree, chat panel, diff viewer)
+- [x] **Phase 8** — Embedded SQLite data layer (`file_changes` table & explicit per-file approval)
+- [x] **Phase 9** — Execution sandbox per `SANDBOX.md` (Docker container per task, resource limits, network isolation)
+- [x] **Phase 10** — Unified LLM Gateway (Anthropic, OpenAI, Ollama adapters & secure OS credential vault)
